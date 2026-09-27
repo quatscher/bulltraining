@@ -40,7 +40,46 @@ label { display:block; margin:6px 0 2px; font-size:12px; color:var(--muted); }
 .row { display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
 form.inline { display:inline; }
 pre { white-space:pre-wrap; font-size:12px; background:var(--bg); padding:8px; border-radius:6px; margin:4px 0; }
+.zb { display:flex; height:6px; border-radius:3px; overflow:hidden; margin-top:3px; background:var(--line); }
+.zb span { display:block; height:100%; }
+.steps { display:flex; flex-direction:column; gap:6px; }
+.step { display:grid; grid-template-columns:130px 170px 1fr; gap:10px; align-items:center; background:var(--card);
+        border:1px solid var(--line); border-left:6px solid; border-radius:8px; padding:8px 12px; }
+.step .dur { font-size:17px; font-weight:700; }
+.step .zl { color:#fff; font-size:11px; padding:1px 6px; border-radius:8px; margin-left:4px; }
+.step .tg { display:flex; flex-wrap:wrap; gap:6px; }
+.chip { background:var(--bg); border:1px solid var(--line); border-radius:12px; padding:2px 10px; font-size:13px; white-space:nowrap; }
+.sthead { font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; margin:10px 0 0; }
+.rep { border:1px dashed var(--line); border-radius:10px; padding:8px; display:flex; flex-direction:column; gap:6px; }
+.rephead { font-weight:700; font-size:13px; }
+.stnote { font-size:13px; color:var(--muted); margin:6px 0 0; }
+main a:not(.btn):not(.s) { color:var(--accent); }
+a.s { display:block; color:inherit; text-decoration:none; } a.s:hover { outline:1px solid var(--accent); }
+@media (max-width: 700px) { .step { grid-template-columns:1fr; gap:4px; } }
 </style>
+<script>
+/* Gestapelte Zonenbalken: je Kategorie ein Balken "geplant" (hell) und "absolviert" (kräftig).
+   rows: [{planned:[5], done:[5], done_no_zones|done_without_zones}], divisor: Sekunden->Minuten (60) bzw. Minuten->Stunden (60). */
+function zoneChart(el, labels, rows, divisor, unit) {
+  const Z = {{ zone_names|tojson_safe }}, C = {{ zone_colors|tojson_safe }};
+  const r1 = v => Math.round(v / divisor * 10) / 10;
+  const ds = [];
+  Z.forEach((z, i) => ds.push({ label: z, zone: i, stack: 'plan', data: rows.map(r => r1(r.planned[i])),
+    backgroundColor: C[i] + '80', borderColor: C[i], borderWidth: 1.5 }));
+  Z.forEach((z, i) => ds.push({ label: z, zone: i, stack: 'done', data: rows.map(r => r1(r.done[i])), backgroundColor: C[i] }));
+  ds.push({ label: 'ohne Zonendaten', zone: 5, stack: 'done', backgroundColor: '#b8b8b8',
+    data: rows.map(r => r1(r.done_no_zones ?? r.done_without_zones ?? 0)) });
+  return new Chart(el, { type: 'bar', data: { labels, datasets: ds },
+    options: { animation: false, maintainAspectRatio: false,
+      scales: { x: { stacked: true }, y: { stacked: true, title: { display: true, text: unit } } },
+      plugins: {
+        legend: { labels: { filter: (item, data) => data.datasets[item.datasetIndex].stack === 'done' },
+          onClick: (e, item, legend) => { const ch = legend.chart, zone = ch.data.datasets[item.datasetIndex].zone;
+            ch.data.datasets.forEach((d, i) => { if (d.zone === zone) ch.setDatasetVisibility(i, !ch.isDatasetVisible(i)); }); ch.update(); } },
+        tooltip: { filter: it => it.raw > 0,
+          callbacks: { label: it => `${it.dataset.stack === 'plan' ? 'geplant' : 'absolviert'} · ${it.dataset.label}: ${it.raw} ${unit}` } } } } });
+}
+</script>
 </head>
 <body hx-boost="true">
 <nav>

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% import "_macros.html" as mx with context %}
+{% block title %}{{ s.title }}{% endblock %}
+{% block content %}
+<p class="small"><a class="muted" href="/calendar?week={{ week }}">← Kalender {{ week }}</a></p>
+<div class="row" style="justify-content:space-between; align-items:start">
+  <div>
+    <h1 style="margin-bottom:4px; border-left:6px solid {{ sport_color.get(s.sport) }}; padding-left:10px">{{ s.title }}</h1>
+    <div class="muted">{{ weekday }} {{ s.date }} · {{ s.duration_s|minutes }}{% if s.target_load %} · Last {{ s.target_load|round|int }}{% endif %}
+      · <span class="pill">{{ s.status }}</span>
+      {% if s.category == 'TEST' %}<span class="pill due_soon">Leistungstest</span>{% endif %}
+      {% if s.category == 'RACE' %}<span class="pill">Wettkampf {{ s.race_priority }}</span>{% endif %}</div>
+  </div>
+  {% if s.activity_id %}<a class="btn" href="/activity/{{ s.activity_id }}">Absolvierte Aktivität ansehen →</a>{% endif %}
+</div>
+
+{% if basis %}<p class="small muted">Zielwerte aus deinen aktuellen Tests: {{ basis|join(' · ') }}</p>{% endif %}
+{% if s.category == 'TEST' %}<div class="flash">Nach dem Test das Ergebnis unter <a href="/performance">Leistung</a> eintragen – es setzt die neuen Schwellen und Zonen.</div>{% endif %}
+
+<h2>Ablauf</h2>
+{{ mx.steps(steps) }}
+
+{% if zones %}
+<h2>Zeit je Zone</h2>
+<div class="card">
+  {{ mx.zonebar(zones) }}
+  <div class="row small" style="margin-top:8px">{% for v in zones %}{% if v > 0 %}<span><span class="zl" style="display:inline-block;width:10px;height:10px;border-radius:2px;background:{{ zone_colors[loop.index0] }}"></span> {{ zone_names[loop.index0] }}: <b>{{ (v / 60)|round|int }} min</b></span>{% endif %}{% endfor %}</div>
+</div>
+{% endif %}
+
+<details class="card"><summary class="small muted">Beschreibung wie auf der Uhr (Intervals-Syntax)</summary><pre>{{ s.description }}</pre></details>
+{% endblock %}

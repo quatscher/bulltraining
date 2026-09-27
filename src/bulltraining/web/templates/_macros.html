@@ -1,0 +1,31 @@
+{% macro zonebar(secs) -%}
+{%- if secs and (secs|sum) > 0 -%}
+{%- set tot = secs|sum -%}
+<div class="zb" title="{% for v in secs %}{% if v > 0 %}{{ zone_names[loop.index0] }}: {{ (v / 60)|round|int }} min&#10;{% endif %}{% endfor %}">
+{%- for v in secs %}{% if v > 0 %}<span style="width:{{ (100 * v / tot)|round(1) }}%;background:{{ zone_colors[loop.index0] }}"></span>{% endif %}{% endfor -%}
+</div>
+{%- endif -%}
+{%- endmacro %}
+
+{% macro step_row(s) -%}
+<div class="step" style="border-left-color:{{ s.color }}">
+  <div class="dur">{{ s.duration }}{% if s.estimated %}<span class="muted small"> ≈ {{ (s.duration_s / 60)|round(1) }} min</span>{% endif %}</div>
+  <div class="what"><b>{{ s.word }}</b> <span class="zl" style="background:{{ s.color }}">{{ s.zone_label.split(' ')[0] }}</span></div>
+  <div class="tg">{% for k, v in s.targets %}<span class="chip"><span class="muted">{{ k }}</span> {{ v }}</span>{% endfor %}</div>
+</div>
+{%- endmacro %}
+
+{% macro steps(items) -%}
+<div class="steps">
+{% for it in items %}
+  {% if it.type == 'text' %}<div class="{{ 'sthead' if it.text|length <= 40 else 'stnote' }}">{{ it.text }}</div>
+  {% elif it.type == 'step' %}{{ step_row(it) }}
+  {% else %}
+  <div class="rep"><div class="rephead">{{ it.count }}× wiederholen <span class="muted small">· {{ (it.duration_s / 60)|round|int }} min</span></div>
+    {% for s in it.steps %}{{ step_row(s) }}{% endfor %}
+  </div>
+  {% endif %}
+{% else %}<p class="muted">Keine strukturierten Schritte in der Beschreibung.</p>
+{% endfor %}
+</div>
+{%- endmacro %}

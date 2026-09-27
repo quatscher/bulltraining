@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as mx with context %}
 {% block title %}Posteingang{% endblock %}
 {% block content %}
 <div class="row" style="justify-content:space-between">
@@ -23,7 +24,7 @@
   <ul>{% for line in c.summary %}<li>{{ line }}</li>{% endfor %}</ul>
   {% if c.warnings %}<div class="warn small">{% for w in c.warnings %}⚠ {{ w }}<br>{% endfor %}</div>{% endif %}
   <details><summary class="small muted">Details (neue Einheiten)</summary>
-    {% for a in c.diff.after if not a._deleted %}<div class="small"><b>{{ a.date }} {{ a.title }}</b> · {{ a.duration_s|minutes }} · Last {{ a.target_load }}<pre>{{ a.description }}</pre></div>{% endfor %}
+    {% for a in c.diff.after if not a._deleted %}<div style="margin:10px 0"><b>{{ a.date }} {{ a.title }}</b> <span class="muted small">· {{ a.duration_s|minutes }} · Last {{ a.target_load }}</span>{{ mx.steps(a.steps) }}</div>{% endfor %}
   </details>
 </div>
 {% else %}<p class="muted">Keine offenen Vorschläge.</p>{% endfor %}

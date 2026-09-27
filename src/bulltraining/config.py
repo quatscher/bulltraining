@@ -35,6 +35,7 @@ DEFAULT_SETTINGS: dict[str, str] = {
     # Schwellenwerte (werden durch Leistungstests gesetzt, hier nur leer angelegt)
     "ftp_w": "",
     "lthr_run": "",
+    "lthr_ride": "",
     "threshold_pace_run_s_per_km": "",
     "css_s_per_100m": "",
     "max_hr": "",

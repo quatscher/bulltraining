@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as mx with context %}
 {% block title %}Kalender{% endblock %}
 {% block content %}
 <style>
@@ -33,13 +34,14 @@
   <div class="day {{ 'today' if d.date == today }}">
     <h4>{{ weekday_de[loop.index0] }} {{ d.date.strftime('%d.%m.') }}</h4>
     {% for s in d.sessions %}
-      <div class="s {{ s.status }}" style="border-color:{{ sport_color.get(s.sport) }}" title="{{ s.description }}">
+      <a class="s {{ s.status }}" href="/session/{{ s.id }}" style="border-color:{{ sport_color.get(s.sport) }}" title="Details anzeigen">
         <b>{{ s.title }}</b><br>{{ s.duration_s|minutes }}{% if s.target_load %} · {{ s.target_load|round|int }}{% endif %}
         <span class="muted">· {{ s.status }}</span>
         {% if s.category == 'TEST' %}<span class="pill due_soon">Test</span>{% endif %}
         {% if s.category == 'RACE' %}<span class="pill">Rennen {{ s.race_priority }}</span>{% endif %}
         {% if s.publish_error %}<br><span class="bad">Upload-Fehler</span>{% endif %}
-      </div>
+        {{ mx.zonebar(s.zones) }}
+      </a>
     {% endfor %}
     {% for a in d.activities %}
       <div class="a" style="border-color:{{ sport_color.get(a.sport) }}">
@@ -47,11 +49,17 @@
         {{ a.duration_s|minutes }}{% if a.load %} · {{ a.load|round|int }} ({{ a.load_method }}){% endif %}
         {% if a.excluded %}<span class="muted">· ausgeschlossen</span>{% endif %}
         {% if a.possible_duplicate_of %}<span class="warn">· Dublette?</span>{% endif %}
+        {{ mx.zonebar(a.zones) }}
       </div>
     {% endfor %}
   </div>
 {% endfor %}
 </div>
+<div class="card" style="margin-top:8px"><div class="small muted">Zeit je Zone und Tag – hell: geplant, kräftig: absolviert</div>
+  <div style="height:190px"><canvas id="zw{{ loop.index }}"></canvas></div></div>
+<script>zoneChart(document.getElementById('zw{{ loop.index }}'),
+  {{ w.days|map(attribute='date')|map('string')|list|tojson_safe }}.map((d, i) => ['Mo','Di','Mi','Do','Fr','Sa','So'][i] + ' ' + d.slice(8, 10) + '.' + d.slice(5, 7) + '.'),
+  {{ w.zone_days|tojson_safe }}, 60, 'min');</script>
 {% if w.info and w.info.targets and w.info.targets.notes %}<p class="small muted">{{ w.info.targets.notes|join(' · ') }}</p>{% endif %}
 {% endfor %}
 

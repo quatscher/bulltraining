@@ -10,6 +10,7 @@ import pandas as pd
 
 from .db import get_float
 from .util import ENDURANCE_SPORTS, monday_of, parse_week, to_date, week_days
+from .zonemodel import ZONES, activity_zone_secs, reference_paces, session_zone_secs
 
 CTL_DAYS = 42
 ATL_DAYS = 7
@@ -152,7 +153,60 @@ def week_summary(conn: sqlite3.Connection, week: str | date | None = None, plan_
             "done_min": int(acts["duration_s"].sum() / 60), "done_load": _r(acts["eff_load"].sum()),
             "done_endurance_load": _r(acts[acts["is_endurance"] == 1]["eff_load"].sum()),
         },
+        "zones_min": _minutes(zone_totals(zone_timeline(conn, monday, sunday, plan_id))),
     }
+
+
+def _minutes(t: dict[str, Any]) -> dict[str, Any]:
+    return {"zones": ZONES, "planned": [round(s / 60) for s in t["planned"]], "done": [round(s / 60) for s in t["done"]],
+            "done_without_zones": round(t["done_no_zones"] / 60)}
+
+
+def zone_timeline(conn: sqlite3.Connection, start: date, end: date, plan_id: int | None = None) -> list[dict[str, Any]]:
+    """Je Tag: Sekunden je Zone (5-Zonen-Modell) geplant und absolviert, plus Ausdauerzeit ohne Zonendaten."""
+    if plan_id is None:
+        row = conn.execute("SELECT id FROM plans WHERE status = 'active'").fetchone()
+        plan_id = row["id"] if row else None
+    days = {(start + timedelta(days=i)).isoformat(): {"planned": [0.0] * 5, "done": [0.0] * 5, "done_no_zones": 0.0}
+            for i in range((end - start).days + 1)}
+    paces = reference_paces(conn)
+    for s in conn.execute("SELECT date, sport, description, duration_s, intensity FROM plan_sessions "
+                          "WHERE plan_id = ? AND date BETWEEN ? AND ? AND status != 'deleted'",
+                          (plan_id or -1, start.isoformat(), end.isoformat())):
+        if s["sport"] not in ENDURANCE_SPORTS:
+            continue
+        for i, v in enumerate(session_zone_secs(dict(s), paces)):
+            days[s["date"]]["planned"][i] += v
+    for a in conn.execute("SELECT start_date, duration_s, zone_times FROM activities WHERE excluded = 0 "
+                          "AND is_endurance = 1 AND start_date >= ? AND start_date < ?",
+                          (start.isoformat(), (end + timedelta(days=1)).isoformat())):
+        day = days[a["start_date"][:10]]
+        secs = activity_zone_secs(a["zone_times"])
+        if secs:
+            for i, v in enumerate(secs):
+                day["done"][i] += v
+        else:
+            day["done_no_zones"] += a["duration_s"] or 0
+    return [{"date": d, **v} for d, v in days.items()]
+
+
+def zone_totals(timeline: list[dict[str, Any]]) -> dict[str, Any]:
+    out = {"planned": [0.0] * 5, "done": [0.0] * 5, "done_no_zones": 0.0}
+    for d in timeline:
+        for i in range(5):
+            out["planned"][i] += d["planned"][i]
+            out["done"][i] += d["done"][i]
+        out["done_no_zones"] += d["done_no_zones"]
+    return out
+
+
+def zone_weeks(conn: sqlite3.Connection, weeks_back: int = 8, weeks_ahead: int = 4,
+               today: date | None = None) -> list[dict[str, Any]]:
+    """Wochenweise Minuten je Zone, geplant und absolviert, von -weeks_back bis +weeks_ahead."""
+    first = monday_of(today or date.today()) - timedelta(weeks=weeks_back)
+    timeline = zone_timeline(conn, first, first + timedelta(weeks=weeks_back + weeks_ahead + 1, days=-1))
+    return [{"week_start": timeline[i]["date"], **_minutes(zone_totals(timeline[i:i + 7]))}
+            for i in range(0, len(timeline), 7)]
 
 
 def zone_distribution(conn: sqlite3.Connection, days: int = 28, today: date | None = None) -> dict[str, Any]:
@@ -296,4 +350,5 @@ def week_done_load(conn: sqlite3.Connection, monday: date) -> float:
 
 
 __all__ = ["form_curves", "form_state", "week_summary", "zone_distribution", "wellness_trend",
+           "zone_timeline", "zone_weeks",
            "training_baseline", "load_corridor", "week_days"]

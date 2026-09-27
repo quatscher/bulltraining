@@ -14,6 +14,7 @@ from .metrics import training_baseline
 from .performance import PROTOCOLS, DEFAULT_PROTOCOL, test_status
 from .periodization import available_templates, load_template, week_context, week_targets
 from .util import ENDURANCE_SPORTS, SPORTS, WEEKDAYS, monday_of, parse_week, to_date
+from .zonemodel import ZONES, reference_paces, session_zone_secs
 
 SESSION_FIELDS = ("id", "plan_id", "date", "sport", "category", "race_priority", "test_protocol", "title",
                   "description", "duration_s", "target_load", "intensity", "status", "external_event_id")
@@ -154,6 +155,7 @@ def get_plan_view(conn: sqlite3.Connection, date_from: str | None = None, date_t
     f = to_date(date_from) if date_from else monday_of(today)
     t = to_date(date_to) if date_to else f + timedelta(days=13)
     goal_days = (to_date(plan["goal_date"]) - today).days if plan.get("goal_date") else None
+    paces = reference_paces(conn)
     weeks = []
     m = monday_of(f)
     while m <= t:
@@ -163,7 +165,11 @@ def get_plan_view(conn: sqlite3.Connection, date_from: str | None = None, date_t
     return {"plan": {k: plan[k] for k in ("id", "name", "goal_type", "goal_date", "goal_kind", "sports", "focus",
                                            "priority", "weekly_hours", "start_date")},
             "days_to_goal": goal_days, "weeks": weeks,
-            "sessions": [{k: s[k] for k in SESSION_FIELDS if k != "plan_id"} for s in get_sessions(conn, plan["id"], f, t)]}
+            "zones": ZONES,
+            "sessions": [{**{k: s[k] for k in SESSION_FIELDS if k != "plan_id"},
+                          "zones_min": [round(v / 60) for v in session_zone_secs(s, paces)]
+                          if s["sport"] in ENDURANCE_SPORTS else None}
+                         for s in get_sessions(conn, plan["id"], f, t)]}
 
 
 # --- Änderungen: Simulation ---------------------------------------------------------

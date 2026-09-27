@@ -23,11 +23,12 @@ class TestError(ValueError):
 PROTOCOLS: dict[str, dict[str, Any]] = {
     "ride_ftp20": {
         "sport": "ride", "name": "FTP-Test 20 min",
-        "summary": "20 min maximal gleichmäßig nach Vorbelastung. FTP = 95 % der Durchschnittsleistung.",
+        "summary": "20 min maximal gleichmäßig nach Vorbelastung. FTP = 95 % der Durchschnittsleistung, "
+                   "Schwellenpuls Rad = 95 % des Durchschnittspulses.",
         "inputs": {"avg_power_20min_w": ("Ø Leistung 20 min in Watt", True),
                    "avg_hr_20min": ("Ø Puls 20 min", False), "max_hr": ("höchster Puls", False)},
         "duration_min": 65,
-        "description": ("Einfahren\n- 15m 55-65%\n3x\n- 1m 100%\n- 1m 55%\n- 5m 105%\n- 10m 50%\n\n"
+        "description": ("Einfahren\n- 15m 55-65%\n\n3x\n- 1m 100%\n- 1m 55%\n\n- 5m 105%\n- 10m 50%\n\n"
                         "Test: 20 Minuten so hoch wie gleichmäßig haltbar\n- 20m 100%\n\nAusfahren\n- 10m 50%"),
     },
     "ride_ramp": {
@@ -68,12 +69,13 @@ METRICS: dict[str, tuple[str, str, bool]] = {
     "ftp_w": ("ride", "FTP", False),
     "threshold_pace_run_s_per_km": ("run", "Schwellenpace", True),
     "lthr_run": ("run", "Schwellenpuls Laufen", False),
+    "lthr_ride": ("ride", "Schwellenpuls Rad", False),
     "css_s_per_100m": ("swim", "CSS", True),
 }
 PRIMARY_METRIC = {"ride": "ftp_w", "run": "threshold_pace_run_s_per_km", "swim": "css_s_per_100m"}
 
 _PLAUSIBLE = {
-    "ftp_w": (50, 600), "threshold_pace_run_s_per_km": (150, 600), "lthr_run": (100, 210),
+    "ftp_w": (50, 600), "threshold_pace_run_s_per_km": (150, 600), "lthr_run": (100, 210), "lthr_ride": (100, 210),
     "css_s_per_100m": (55, 240), "max_hr": (120, 230),
 }
 
@@ -88,6 +90,8 @@ def evaluate(protocol: str, inputs: dict[str, Any]) -> dict[str, float]:
     r: dict[str, float] = {}
     if protocol == "ride_ftp20":
         r["ftp_w"] = round(0.95 * float(inputs["avg_power_20min_w"]))
+        if inputs.get("avg_hr_20min"):
+            r["lthr_ride"] = round(0.95 * float(inputs["avg_hr_20min"]))  # Friel: 95 % des 20-min-Pulses
     elif protocol == "ride_ramp":
         r["ftp_w"] = round(0.75 * float(inputs["best_1min_power_w"]))
     elif protocol == "run_30min_tt":

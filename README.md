@@ -22,7 +22,9 @@ Ohne API-Key ausprobieren: `bulltraining demo` legt 16 Wochen synthetisches Trai
 3. **Plan anlegen** (Ansicht *Pläne*): Zieltyp, Zielart, Wochenstunden, verfügbare Tage. Die Planübersicht zeigt, welche Tests fehlen und wie lange der Aufbau vom aktuellen Umfang bis zum Ziel dauert.
 4. **Woche generieren** (Kalender-Button, `bulltraining next-week` oder im Chat `regenerate_week`): Das ergibt einen Vorschlag im Posteingang. Der Vorschlag hält den Lastkorridor ein, plant fehlende Tests zuerst ein und orientiert sich an Häufigkeit und Länge der aktuellen Einheiten.
 5. **Bestätigen** im Posteingang; Änderungen lassen sich dort auch rückgängig machen.
-6. **Veröffentlichen** (`bulltraining publish` oder Button): bestätigte Einheiten der nächsten 14 Tage gehen nach intervals.icu und von dort auf die Uhr.
+6. **Zonen im Blick:** Kalender (je Tag) und *Form* (je Woche, 12 zurück, 4 voraus) zeigen die Zeit je Zone, geplant (hell) gegen absolviert (kräftig); jede Einheit hat zusätzlich einen Mini-Zonenbalken. Geplante Zonen werden aus der Workout-Beschreibung gelesen, absolvierte kommen aus intervals.icu.
+7. **Einheit im Detail:** Klick auf eine geplante Einheit im Kalender zeigt den Ablauf Schritt für Schritt mit konkreten Zielen aus den aktuellen Tests (Dauer, Pace bzw. Watt, Pulsbereich), Wiederholungsblöcke und Zeit je Zone. Im Chat liefert `get_session` dasselbe als Text.
+8. **Veröffentlichen** (`bulltraining publish` oder Button): bestätigte Einheiten der nächsten 14 Tage gehen nach intervals.icu und von dort auf die Uhr.
 
 ## MCP (Claude Desktop / Claude Code)
 
@@ -38,7 +40,7 @@ Ohne API-Key ausprobieren: `bulltraining demo` legt 16 Wochen synthetisches Trai
 }
 ```
 
-Werkzeuge: `get_form_state`, `get_performance_state`, `get_training_load_context`, `get_week_summary`, `get_zone_distribution`, `get_wellness_trend`, `get_plan`, `get_activity`, `get_pending_changes`, `log_activity`, `update_activity`, `record_performance_test`, `propose_plan_change`.
+Werkzeuge: `get_form_state`, `get_performance_state`, `get_training_load_context`, `get_week_summary`, `get_zone_distribution`, `get_wellness_trend`, `get_plan`, `get_session`, `get_activity`, `get_pending_changes`, `log_activity`, `update_activity`, `record_performance_test`, `propose_plan_change`.
 
 ## Aufbau
 

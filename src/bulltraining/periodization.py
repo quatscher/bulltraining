@@ -78,7 +78,8 @@ def week_context(plan: dict[str, Any], monday: date) -> dict[str, Any]:
     split = tpl["phase_split"]
     phase = "base" if pos < split["base"] else ("build" if pos < split["base"] + split["build"] else "specific")
     weeks_before_taper = to_goal - taper  # 1 = letzte Woche vor dem Taper
-    wt = "recovery" if weeks_before_taper % 4 == 0 and weeks_before_taper > 0 and idx > 0 else "load"
+    # Blöcke enden am Taper; die erste Entlastung frühestens nach drei Belastungswochen ab Planstart
+    wt = "recovery" if weeks_before_taper % 4 == 0 and weeks_before_taper > 0 and idx >= 3 else "load"
     return {"phase": phase, "week_type": wt, "week_index": idx, "weeks_to_goal": to_goal,
             "block_week": 4 - (weeks_before_taper % 4) if weeks_before_taper % 4 else 4}
 

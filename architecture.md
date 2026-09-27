@@ -404,6 +404,7 @@ Bewusst langweilig. Wenige Ansichten, mehr nicht (umgesetzt: Kalender, Leistung,
 | --- | --- |
 | Kalender | Wochenraster, geplant gegen absolviert, Farbe nach Sportart, Wochenziel und Lastkorridor |
 | Leistung | Leistungszustand aus Tests, Testeingabe, Verlauf, Zonen, aktueller Umfang und Belastbarkeit |
+| Zonen (in Kalender und Form) | Zeit je Zone und Tag bzw. Woche, geplant gegen absolviert, gemeinsames 5-Zonen-Modell; geplant aus der Workout-Beschreibung (`zonemodel.py`), absolviert aus den Zonenzeiten von intervals.icu |
 | Form | beide CTL-Kurven, ATL, Form, HRV als Nebenachse |
 | Posteingang | offene Diffs bestätigen oder verwerfen, offene Dublettenpaare auflösen |
 | Aktivität | eine Einheit im Detail, Felder korrigierbar |

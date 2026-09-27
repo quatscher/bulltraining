@@ -14,6 +14,13 @@
     {% else %}<div class="muted small">{{ state.hrv.reason }}</div>{% endif %}</div>
 </div>
 <div class="card"><canvas id="c" height="110"></canvas></div>
+<div class="card"><h3>Zonen je Woche</h3>
+  <div class="small muted">Stunden je Zone, letzte 12 Wochen und 4 Wochen voraus – hell: geplant, kräftig: absolviert. Klick auf die Legende blendet eine Zone aus.</div>
+  <div style="height:260px"><canvas id="zweeks"></canvas></div></div>
+<script>(() => { const w = {{ zone_weeks|tojson_safe }}; const now = '{{ today.isoformat() }}';
+  zoneChart(document.getElementById('zweeks'),
+    w.map((x, i) => x.week_start.slice(8, 10) + '.' + x.week_start.slice(5, 7) + '.' + (x.week_start <= now && (i + 1 === w.length || w[i + 1].week_start > now) ? ' ◀' : '')),
+    w, 60, 'h'); })();</script>
 <div class="grid">
 <div class="card"><h3>Zonen 28 Tage</h3>
 {% if zones.polarization %}<p>niedrig {{ zones.polarization.low_pct }} % · mittel {{ zones.polarization.mid_pct }} % · hoch {{ zones.polarization.high_pct }} %</p>{% else %}<p class="muted">keine Zonendaten</p>{% endif %}

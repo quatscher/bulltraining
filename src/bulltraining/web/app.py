@@ -9,19 +9,32 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from markupsafe import Markup
 
 from .. import activities, duplicates, metrics, performance, plans
 from ..db import all_settings, connect, set_setting
 from ..intervals_client import IntervalsClient, IntervalsError
 from ..periodization import available_templates, week_context, week_targets, weekly_series
 from ..util import SPORTS, WEEKDAYS, fmt_pace, iso_week, monday_of, parse_week, week_days
+from ..zonemodel import ZONE_COLORS, ZONES, activity_zone_secs, reference_paces, session_zone_secs
+from ..workout_view import Thresholds, workout_steps
 
 app = FastAPI(title="bulltraining")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.filters["pace"] = lambda v, unit="/km": fmt_pace(v, unit) or "–"
 templates.env.filters["minutes"] = lambda s: f"{int(s or 0) // 60} min"
 templates.env.filters["hm"] = lambda s: f"{int(s or 0) // 3600}:{int(s or 0) % 3600 // 60:02d} h"
-templates.env.filters["tojson_safe"] = lambda v: json.dumps(v, ensure_ascii=False)
+
+
+def _script_json(value: Any) -> Markup:
+    """JSON für <script>-Blöcke: nicht HTML-escapen (sonst &#34; statt "), aber <, >, & und ' maskieren."""
+    text = json.dumps(value, ensure_ascii=False, default=str)
+    for ch, esc in (("<", "\\u003c"), (">", "\\u003e"), ("&", "\\u0026"), ("'", "\\u0027")):
+        text = text.replace(ch, esc)
+    return Markup(text)
+
+
+templates.env.filters["tojson_safe"] = _script_json
 _conn = None
 
 SPORT_COLOR = {"run": "#e0703a", "ride": "#3a7be0", "swim": "#2bb3a8", "strength": "#8a63d2", "other": "#888"}
@@ -40,7 +53,7 @@ def render(request: Request, name: str, **ctx: Any) -> HTMLResponse:
     pending = c.execute("SELECT count(*) AS n FROM plan_changes WHERE status = 'pending'").fetchone()["n"]
     dupes = c.execute("SELECT count(*) AS n FROM activities WHERE possible_duplicate_of IS NOT NULL").fetchone()["n"]
     return templates.TemplateResponse(request, name, {
-        "inbox_count": pending + dupes, "sport_color": SPORT_COLOR, "weekday_de": WEEKDAY_DE, "today": date.today(),
+        "inbox_count": pending + dupes, "sport_color": SPORT_COLOR, "zone_names": ZONES, "zone_colors": ZONE_COLORS, "weekday_de": WEEKDAY_DE, "today": date.today(),
         "flash": request.query_params.get("msg"), "error": request.query_params.get("err"), **ctx})
 
 
@@ -67,9 +80,16 @@ def calendar(request: Request, week: str | None = None) -> HTMLResponse:
         m = monday + timedelta(weeks=k)
         sessions = plans.get_sessions(c, plan["id"] if plan else None, m, m + timedelta(days=6))
         acts = [dict(r) for r in c.execute(
-            "SELECT id, start_date, sport, name, duration_s, load, load_method, rpe, excluded, possible_duplicate_of "
+            "SELECT id, start_date, sport, name, duration_s, load, load_method, rpe, excluded, possible_duplicate_of, "
+            "is_endurance, zone_times "
             "FROM activities WHERE start_date >= ? AND start_date < ? ORDER BY start_date",
             (m.isoformat(), (m + timedelta(days=7)).isoformat()))]
+        paces = reference_paces(c)
+        for s in sessions:
+            s["zones"] = session_zone_secs(s, paces) if s["sport"] in ("run", "ride", "swim") else None
+        for a in acts:
+            a["zones"] = activity_zone_secs(a.pop("zone_times")) if a["is_endurance"] else None
+        timeline = metrics.zone_timeline(c, m, m + timedelta(days=6), plan["id"] if plan else None)
         days = []
         for d in week_days(m):
             days.append({"date": d, "sessions": [s for s in sessions if s["date"] == d.isoformat()],
@@ -79,9 +99,39 @@ def calendar(request: Request, week: str | None = None) -> HTMLResponse:
             ctx = week_context(plan, m)
             info = {"ctx": ctx, "targets": week_targets(c, plan, m) if m >= monday_of(date.today()) else None}
         weeks.append({"monday": m, "iso": iso_week(m), "days": days, "summary": metrics.week_summary(c, m),
-                      "info": info})
+                      "info": info, "zone_days": timeline})
     return render(request, "calendar.html", weeks=weeks, plan=plan,
                   prev=iso_week(monday - timedelta(weeks=1)), next=iso_week(monday + timedelta(weeks=1)))
+
+
+@app.get("/session/{session_id}", response_class=HTMLResponse)
+def session_view(request: Request, session_id: int) -> HTMLResponse:
+    c = conn()
+    row = c.execute("SELECT * FROM plan_sessions WHERE id = ?", (session_id,)).fetchone()
+    if row is None:
+        return back("/calendar", err=f"Einheit {session_id} nicht gefunden")
+    s = dict(row)
+    endurance = s["sport"] in ("run", "ride", "swim")
+    th = Thresholds(c)
+    basis = []
+    if s["sport"] == "ride" and th.ftp:
+        basis.append(f"FTP {th.ftp:.0f} W")
+    if s["sport"] in ("run", "swim") and th.pace.get(s["sport"]):
+        label = "Schwellenpace" if s["sport"] == "run" else "CSS"
+        basis.append(f"{label} {fmt_pace(th.pace[s['sport']], '/km' if s['sport'] == 'run' else '/100 m')}")
+    if th.lthr.get(s["sport"]):
+        basis.append(f"Schwellenpuls {th.lthr[s['sport']]:.0f}")
+    elif th.max_hr and s["sport"] != "swim":
+        basis.append(f"HFmax {th.max_hr:.0f} (Puls grob, kein Schwellenpuls getestet)")
+    if endurance:
+        t = performance.test_status(c, s["sport"])
+        if t["last_test"]:
+            basis.append(f"Test vom {t['last_test']}" + (" – veraltet" if t["status"] == "stale" else ""))
+        else:
+            basis.append("kein Test – Vorgaben nach Pulszone")
+    return render(request, "session.html", s=s, steps=workout_steps(th, s["sport"], s["description"]),
+                  zones=session_zone_secs(s, reference_paces(c)) if endurance else None, basis=basis,
+                  week=iso_week(s["date"]), weekday=WEEKDAY_DE[date.fromisoformat(s["date"]).weekday()])
 
 
 @app.post("/plan/generate")
@@ -107,7 +157,8 @@ def form_view(request: Request, days: int = 180) -> HTMLResponse:
            for k in ("ctl_endurance", "ctl_total", "atl_endurance", "form_endurance", "hrv", "ctl_icu")},
     }
     return render(request, "form.html", state=metrics.form_state(c), series=series,
-                  wellness=metrics.wellness_trend(c, 14), zones=metrics.zone_distribution(c, 28), days=days)
+                  wellness=metrics.wellness_trend(c, 14), zones=metrics.zone_distribution(c, 28), days=days,
+                  zone_weeks=metrics.zone_weeks(c, weeks_back=12, weeks_ahead=4))
 
 
 @app.get("/performance", response_class=HTMLResponse)
@@ -157,7 +208,13 @@ def inbox(request: Request) -> HTMLResponse:
                                          "WHERE publish_error IS NOT NULL AND status = 'planned'")]
     unpublished = c.execute("SELECT count(*) AS n FROM plan_sessions ps JOIN plans p ON p.id = ps.plan_id AND p.status='active' "
                             "WHERE ps.status IN ('planned','deleted') AND ps.date >= ?", (date.today().isoformat(),)).fetchone()["n"]
-    return render(request, "inbox.html", pending=plans.list_changes(c, "pending"),
+    pending = plans.list_changes(c, "pending")
+    th = Thresholds(c)
+    for ch in pending:
+        for a in ch["diff"]["after"]:
+            if not a.get("_deleted"):
+                a["steps"] = workout_steps(th, a["sport"], a.get("description"))
+    return render(request, "inbox.html", pending=pending,
                   log=[x for x in plans.list_changes(c, limit=30) if x["status"] != "pending"],
                   pairs=duplicates.open_pairs(c), runs=runs, publish_errors=errors, unpublished=unpublished)
 

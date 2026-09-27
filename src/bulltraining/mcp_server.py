@@ -10,6 +10,7 @@ from . import activities, metrics, performance, plans
 from .db import connect
 from .periodization import week_targets
 from .util import monday_of, parse_week
+from .workout_view import steps_as_text, workout_steps
 
 INSTRUCTIONS = """Trainingssystem eines Ausdauersportlers. Regeln:
 - Leistungszustand kommt aus Leistungstests (get_performance_state). Fehlt ein gültiger Test, zuerst einen Test
@@ -97,7 +98,7 @@ def get_training_load_context(week: str | None = None) -> dict[str, Any]:
 
 @mcp.tool()
 def get_week_summary(week: str | None = None) -> dict[str, Any]:
-    """Dauer und Last je Sportart, geplant gegen absolviert. week: ISO-Woche '2026-W40' oder Datum; leer = aktuelle."""
+    """Dauer und Last je Sportart sowie Minuten je Zone (Z1–Z5), geplant gegen absolviert. week: ISO-Woche '2026-W40' oder Datum; leer = aktuelle."""
     return metrics.week_summary(conn(), week)
 
 
@@ -115,8 +116,23 @@ def get_wellness_trend(days: int = 14) -> dict[str, Any]:
 
 @mcp.tool()
 def get_plan(date_from: str | None = None, date_to: str | None = None) -> dict[str, Any]:
-    """Geplante Einheiten des aktiven Plans mit Status, Phase und Wochentyp. Standard: zwei Wochen ab Montag."""
+    """Geplante Einheiten des aktiven Plans mit Status, Phase, Wochentyp und Minuten je Zone (zones_min, Z1–Z5).
+    Standard: zwei Wochen ab Montag."""
     return plans.get_plan_view(conn(), date_from, date_to)
+
+
+@mcp.tool()
+def get_session(session_id: int) -> dict[str, Any]:
+    """Eine geplante Einheit Schritt für Schritt mit konkreten Zielwerten aus den aktuellen Tests,
+    z. B. "10 min Grundlage – Pace 5:40–6:05/km, Puls ca. 138–146 bpm". Für "was steht heute/morgen an?"."""
+    row = conn().execute("SELECT * FROM plan_sessions WHERE id = ? AND status != 'deleted'", (session_id,)).fetchone()
+    if row is None:
+        return {"ok": False, "error": f"Einheit {session_id} nicht gefunden"}
+    s = dict(row)
+    items = workout_steps(conn(), s["sport"], s["description"])
+    return {"id": s["id"], "date": s["date"], "sport": s["sport"], "title": s["title"], "status": s["status"],
+            "duration_min": s["duration_s"] // 60, "target_load": s["target_load"], "category": s["category"],
+            "steps": steps_as_text(items)}
 
 
 @mcp.tool()
