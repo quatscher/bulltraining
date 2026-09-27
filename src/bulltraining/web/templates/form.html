@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Form{% endblock %}
+{% block content %}
+<h1>Form <span class="muted small">letzte {{ days }} Tage</span></h1>
+<div class="grid">
+  <div class="card"><div class="muted small">CTL Ausdauer</div><div class="big">{{ state.ctl_endurance }}</div>
+    <div class="small muted">intervals.icu: {{ state.ctl_icu or '–' }} · Ramp 7 T: {{ state.ctl_ramp_7d }}</div></div>
+  <div class="card"><div class="muted small">ATL Ausdauer</div><div class="big">{{ state.atl_endurance }}</div></div>
+  <div class="card"><div class="muted small">Form (TSB)</div><div class="big {{ 'bad' if state.form_endurance < -25 else ('ok' if state.form_endurance > -10 else 'warn') }}">{{ state.form_endurance }}</div></div>
+  <div class="card"><div class="muted small">CTL gesamt (inkl. Kraft)</div><div class="big">{{ state.ctl_total }}</div><div class="small muted">Form gesamt {{ state.form_total }}</div></div>
+  <div class="card"><div class="muted small">HRV 7 Tage</div>
+    {% if state.hrv.available %}<div class="big {{ 'bad' if state.hrv.deviation_sd < -1 else ('warn' if state.hrv.deviation_sd < -0.5 else 'ok') }}">{{ state.hrv.mean_7d }}</div>
+    <div class="small muted">Baseline {{ state.hrv.baseline_60d }} · {{ state.hrv.deviation_sd }} SD · {{ state.hrv.days_below_baseline_in_row }} Tage darunter</div>
+    {% else %}<div class="muted small">{{ state.hrv.reason }}</div>{% endif %}</div>
+</div>
+<div class="card"><canvas id="c" height="110"></canvas></div>
+<div class="grid">
+<div class="card"><h3>Zonen 28 Tage</h3>
+{% if zones.polarization %}<p>niedrig {{ zones.polarization.low_pct }} % · mittel {{ zones.polarization.mid_pct }} % · hoch {{ zones.polarization.high_pct }} %</p>{% else %}<p class="muted">keine Zonendaten</p>{% endif %}
+{% for sport, kinds in zones.by_sport.items() %}{% for kind, z in kinds.items() %}
+  <div class="small"><b>{{ sport }}</b> ({{ kind }}): {% for k, v in z.items() %}{{ k }} {{ v }}′ {% endfor %}</div>
+{% endfor %}{% endfor %}
+</div>
+<div class="card"><h3>Wellness 14 Tage</h3>
+<table><tr><th>Datum</th><th>HRV</th><th>Ruhepuls</th><th>Schlaf</th></tr>
+{% for r in wellness.series|reverse %}<tr><td>{{ r.date }}</td><td>{{ r.hrv or '–' }}</td><td>{{ r.resting_hr or '–' }}</td><td>{{ r.sleep_h or '–' }}</td></tr>{% endfor %}
+</table></div>
+</div>
+<script>
+(() => {
+  const s = {{ series|tojson_safe }};
+  const muted = getComputedStyle(document.documentElement).getPropertyValue('--muted');
+  new Chart(document.getElementById('c'), {
+    type: 'line',
+    data: { labels: s.dates, datasets: [
+      { label: 'CTL Ausdauer', data: s.ctl_endurance, borderColor: '#3a7be0', pointRadius: 0, borderWidth: 2 },
+      { label: 'CTL gesamt', data: s.ctl_total, borderColor: '#8a63d2', pointRadius: 0, borderWidth: 1.5, borderDash: [4,3] },
+      { label: 'ATL', data: s.atl_endurance, borderColor: '#e0703a', pointRadius: 0, borderWidth: 1 },
+      { label: 'Form', data: s.form_endurance, borderColor: '#2f9e5b', pointRadius: 0, borderWidth: 1.5 },
+      { label: 'CTL intervals.icu', data: s.ctl_icu, borderColor: '#999', pointRadius: 0, borderWidth: 1, borderDash: [2,2] },
+      { label: 'HRV', data: s.hrv, borderColor: '#c98a12', backgroundColor: '#c98a12', pointRadius: 1.5, showLine: false, yAxisID: 'y2' },
+    ]},
+    options: { animation: false, interaction: { mode: 'index', intersect: false },
+      scales: { x: { ticks: { maxTicksLimit: 12, color: muted } }, y: { ticks: { color: muted } },
+                y2: { position: 'right', grid: { drawOnChartArea: false }, ticks: { color: '#c98a12' } } } }
+  });
+})();
+</script>
+{% endblock %}

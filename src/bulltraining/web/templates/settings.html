@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Einstellungen{% endblock %}
+{% block content %}
+<h1>Einstellungen</h1>
+<p class="muted small">Grenzwerte für Progression und Tests. Schwellenwerte werden normalerweise durch Leistungstests gesetzt.</p>
+<form class="card" method="post" action="/settings">
+<table>
+{% for k, v in settings.items() %}
+<tr><td><label for="{{ k }}" style="margin:0">{{ k }}</label></td><td><input id="{{ k }}" name="{{ k }}" value="{{ v }}"></td></tr>
+{% endfor %}
+</table>
+<p><button class="primary">Speichern</button></p>
+</form>
+{% endblock %}

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Pläne{% endblock %}
+{% block content %}
+<h1>Pläne</h1>
+{% if active %}
+<div class="card">
+  <div class="row" style="justify-content:space-between">
+    <div><b>{{ active.name }}</b> <span class="pill valid">aktiv</span>
+      <div class="small muted">{{ active.goal_type }}{% if active.goal_date %} · Ziel {{ active.goal_date }} ({{ active.priority }}){% endif %}
+        · {{ active.goal_kind or 'generisch' }}{% if active.focus %} · Fokus {{ active.focus }}{% endif %}
+        · {{ active.sports|join(', ') }} · {{ active.weekly_hours }} h/Woche · Start {{ active.start_date }}</div></div>
+    <form class="inline" method="post" action="/plans/{{ active.id }}/archive" onsubmit="return confirm('Plan archivieren?')"><button>Archivieren</button></form>
+  </div>
+  {% if readiness %}
+  <h3>Grundlage</h3>
+  <div class="row">{% for s, t in readiness.tests.items() %}<span class="pill {{ t.status }}">{{ s }}: {{ t.last_test or 'kein Test' }}</span>{% endfor %}
+    <span class="pill">aktuell {{ readiness.current_hours }} h → Ziel {{ readiness.target_hours }} h</span></div>
+  <ul>{% for n in readiness.notes %}<li>{{ n }}</li>{% endfor %}</ul>
+  {% endif %}
+</div>
+{% endif %}
+
+<h2>Neuer Plan</h2>
+<form class="card" method="post" action="/plans">
+  <div class="row">
+    <div><label>Name</label><input name="name" required></div>
+    <div><label>Zieltyp</label><select name="goal_type" id="goal_type"><option value="event">Wettkampf (event)</option><option value="continuous">kontinuierlich</option></select></div>
+    <div class="ev"><label>Zieldatum</label><input type="date" name="goal_date"></div>
+    <div class="ev"><label>Priorität</label><select name="priority"><option>A</option><option>B</option><option>C</option></select></div>
+    <div><label>Zielart (Vorlage)</label><select name="goal_kind">{% for t in templates_list %}<option value="{{ t.goal_kind }}">{{ t.label }}</option>{% endfor %}</select></div>
+    <div class="co" style="display:none"><label>Fokus</label><select name="focus"><option value="aerobic">aerob</option><option value="ftp">Schwelle/FTP</option><option value="speed">Tempo/VO2</option><option value="health">Gesundheit</option></select></div>
+    <div><label>Ziel-Wochenstunden</label><input name="weekly_hours" required style="width:90px" placeholder="8"></div>
+    <div><label>Start (Montag)</label><input type="date" name="start_date"></div>
+  </div>
+  <label>Sportarten</label>
+  <div class="row">{% for s in sports %}<label style="margin:0"><input type="checkbox" name="sports" value="{{ s }}" {{ 'checked' if s in ['run','ride','swim'] }}> {{ s }}</label>{% endfor %}</div>
+  <label>Verfügbare Tage je Sportart (optional Maximalminuten; leer = alle Tage außer Montag)</label>
+  <div class="scroll"><table>
+    <tr><th></th>{% for d in weekdays %}<th>{{ weekday_de[loop.index0] }}</th>{% endfor %}</tr>
+    {% for s in sports %}<tr><td>{{ s }}</td>{% for d in weekdays %}
+      <td><input type="checkbox" name="avail__{{ s }}__{{ d }}" value="1"> <input name="cap__{{ s }}__{{ d }}" placeholder="min" style="width:52px"></td>{% endfor %}</tr>{% endfor %}
+  </table></div>
+  <p class="small muted">Der Plan startet beim aktuellen Trainingsumfang (Ø der letzten Wochen) und steigert kontrolliert Richtung Zielstunden. Fehlen Leistungstests, enthält die erste Woche die Tests.</p>
+  <button class="primary">Plan anlegen</button>
+</form>
+
+<h2>Alle Pläne</h2>
+<div class="card scroll"><table><tr><th>#</th><th>Name</th><th>Typ</th><th>Ziel</th><th>Stunden</th><th>Status</th></tr>
+{% for p in plans %}<tr><td>{{ p.id }}</td><td>{{ p.name }}</td><td>{{ p.goal_type }} / {{ p.goal_kind or '–' }}</td><td>{{ p.goal_date or '–' }}</td><td>{{ p.weekly_hours }}</td><td>{{ p.status }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">noch keine</td></tr>{% endfor %}</table></div>
+<script>
+(() => { const g = document.getElementById('goal_type');
+  const f = () => { document.querySelectorAll('.ev').forEach(e => e.style.display = g.value === 'event' ? '' : 'none');
+                    document.querySelectorAll('.co').forEach(e => e.style.display = g.value === 'event' ? 'none' : ''); };
+  g.addEventListener('change', f); f(); })();
+</script>
+{% endblock %}

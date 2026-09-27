@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Kalender{% endblock %}
+{% block content %}
+<style>
+.week { display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; }
+.day { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:6px; min-height:120px; min-width:0; }
+.day.today { border-color:var(--accent); }
+.day h4 { margin:0 0 4px; font-size:12px; color:var(--muted); font-weight:600; }
+.s { border-left:4px solid; padding:3px 6px; margin:4px 0; border-radius:4px; background:var(--bg); font-size:12px; }
+.s.done { opacity:.6; } .s.skipped { text-decoration:line-through; opacity:.5; }
+.a { font-size:12px; padding:3px 6px; margin:4px 0; border-radius:4px; border:1px dashed var(--line); }
+.a a { color:inherit; }
+@media (max-width: 800px) { .week { grid-template-columns:1fr; } .day { min-height:0; } }
+</style>
+<div class="row" style="justify-content:space-between">
+  <h1>Kalender {% if plan %}<span class="muted small">· {{ plan.name }}</span>{% endif %}</h1>
+  <div class="row">
+    <a class="btn" href="/calendar?week={{ prev }}">←</a>
+    <a class="btn" href="/calendar">Heute</a>
+    <a class="btn" href="/calendar?week={{ next }}">→</a>
+    {% if plan %}<form class="inline" method="post" action="/plan/generate"><button class="primary">Nächste Woche generieren</button></form>{% endif %}
+  </div>
+</div>
+{% for w in weeks %}
+<h2>{{ w.iso }} <span class="muted small">
+  {% if w.info %}{{ w.info.ctx.phase }} · {{ w.info.ctx.week_type }} ·{% endif %}
+  geplant {{ w.summary.total.planned_min }} min / Last {{ (w.summary.total.planned_load or 0)|round|int }}
+  · absolviert {{ w.summary.total.done_min }} min / Last {{ (w.summary.total.done_load or 0)|round|int }}
+  {% if w.info and w.info.targets %} · Ziel {{ w.info.targets.target_hours }} h, Korridor {{ w.info.targets.load_corridor.lower|round|int }}–{{ w.info.targets.load_corridor.upper|round|int }}{% endif %}
+</span></h2>
+<div class="week">
+{% for d in w.days %}
+  <div class="day {{ 'today' if d.date == today }}">
+    <h4>{{ weekday_de[loop.index0] }} {{ d.date.strftime('%d.%m.') }}</h4>
+    {% for s in d.sessions %}
+      <div class="s {{ s.status }}" style="border-color:{{ sport_color.get(s.sport) }}" title="{{ s.description }}">
+        <b>{{ s.title }}</b><br>{{ s.duration_s|minutes }}{% if s.target_load %} · {{ s.target_load|round|int }}{% endif %}
+        <span class="muted">· {{ s.status }}</span>
+        {% if s.category == 'TEST' %}<span class="pill due_soon">Test</span>{% endif %}
+        {% if s.category == 'RACE' %}<span class="pill">Rennen {{ s.race_priority }}</span>{% endif %}
+        {% if s.publish_error %}<br><span class="bad">Upload-Fehler</span>{% endif %}
+      </div>
+    {% endfor %}
+    {% for a in d.activities %}
+      <div class="a" style="border-color:{{ sport_color.get(a.sport) }}">
+        <a href="/activity/{{ a.id }}">✓ {{ a.name or a.sport }}</a><br>
+        {{ a.duration_s|minutes }}{% if a.load %} · {{ a.load|round|int }} ({{ a.load_method }}){% endif %}
+        {% if a.excluded %}<span class="muted">· ausgeschlossen</span>{% endif %}
+        {% if a.possible_duplicate_of %}<span class="warn">· Dublette?</span>{% endif %}
+      </div>
+    {% endfor %}
+  </div>
+{% endfor %}
+</div>
+{% if w.info and w.info.targets and w.info.targets.notes %}<p class="small muted">{{ w.info.targets.notes|join(' · ') }}</p>{% endif %}
+{% endfor %}
+
+<h2>Aktivität erfassen (z. B. Krafttraining)</h2>
+<form class="card row" method="post" action="/activity">
+  <div><label>Datum</label><input type="date" name="date" value="{{ today.isoformat() }}" required></div>
+  <div><label>Sportart</label><select name="sport">{% for s in ['strength','run','ride','swim','other'] %}<option>{{ s }}</option>{% endfor %}</select></div>
+  <div><label>Dauer (min)</label><input type="number" name="duration_min" min="1" required style="width:90px"></div>
+  <div><label>RPE 1–10 (Pflicht)</label><input type="number" name="rpe" min="1" max="10" required style="width:80px"></div>
+  <div><label>Name</label><input name="name"></div>
+  <div><label>Notiz</label><input name="notes"></div>
+  <button class="primary">Speichern</button>
+</form>
+{% endblock %}

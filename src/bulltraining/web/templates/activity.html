@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Aktivität{% endblock %}
+{% block content %}
+<h1>{{ a.name or a.sport }} <span class="muted small">{{ a.start_date }} · {{ a.source }}{% if a.external_id %} · {{ a.external_id }}{% endif %}</span></h1>
+<div class="grid">
+  <div class="card"><div class="muted small">Dauer</div><div class="big">{{ a.duration_s|hm }}</div></div>
+  <div class="card"><div class="muted small">Last</div><div class="big">{{ a.load|round|int if a.load else '–' }}</div><div class="small muted">{{ a.load_method or 'keine Messung' }}</div></div>
+  <div class="card"><div class="muted small">Puls Ø / max</div><div class="big">{{ a.hr_avg or '–' }} / {{ a.hr_max or '–' }}</div></div>
+  {% if a.power_avg %}<div class="card"><div class="muted small">Leistung Ø</div><div class="big">{{ a.power_avg }} W</div></div>{% endif %}
+  {% if a.distance_m %}<div class="card"><div class="muted small">Distanz</div><div class="big">{{ (a.distance_m / 1000)|round(2) }} km</div></div>{% endif %}
+</div>
+{% if a.possible_duplicate_of %}<div class="flash err">Mögliche Dublette von <a href="/activity/{{ a.possible_duplicate_of }}">#{{ a.possible_duplicate_of }}</a> – im Posteingang auflösen.</div>{% endif %}
+<form class="card" method="post" action="/activity/{{ a.id }}">
+  <div class="row">
+    {% if a.source == 'local' %}
+    <div><label>Name</label><input name="name" value="{{ a.name or '' }}"></div>
+    <div><label>Sportart</label><select name="sport">{% for s in sports %}<option {{ 'selected' if s == a.sport }}>{{ s }}</option>{% endfor %}</select></div>
+    <div><label>Start</label><input name="start_date" value="{{ a.start_date }}"></div>
+    <div><label>Dauer (min)</label><input type="number" name="duration_min" value="{{ (a.duration_s / 60)|round|int }}" style="width:90px"></div>
+    {% endif %}
+    <div><label>RPE</label><input type="number" min="1" max="10" name="rpe" value="{{ a.rpe or '' }}" style="width:70px"></div>
+    <div><label><input type="checkbox" name="is_endurance" value="1" {{ 'checked' if a.is_endurance }}> Ausdauer (zählt in CTL Ausdauer)</label>
+         <label><input type="checkbox" name="excluded" value="1" {{ 'checked' if a.excluded }}> aus Lastrechnung ausschließen</label></div>
+  </div>
+  <label>Notiz</label><textarea name="notes" rows="2" style="width:100%">{{ a.notes or '' }}</textarea>
+  <p><button class="primary">Speichern</button> {% if a.source == 'intervals' %}<span class="small muted">Messwerte werden in intervals.icu korrigiert; hier nur RPE, Notiz und Zuordnung.</span>{% endif %}</p>
+</form>
+{% if a.zone_times %}<div class="card"><h3>Zonen ({{ a.zone_times.kind }})</h3>{% for s in a.zone_times.secs %}Z{{ loop.index }} {{ (s / 60)|round|int }}′ &nbsp; {% endfor %}</div>{% endif %}
+{% if a.intervals %}<div class="card scroll"><h3>Intervalle</h3><table><tr><th>Label</th><th>Typ</th><th>Dauer</th><th>W</th><th>Puls</th></tr>
+{% for i in a.intervals %}<tr><td>{{ i.label or '' }}</td><td>{{ i.type or '' }}</td><td>{{ i.moving_time|minutes }}</td><td>{{ i.average_watts or '' }}</td><td>{{ i.average_heartrate or '' }}</td></tr>{% endfor %}</table></div>{% endif %}
+{% endblock %}

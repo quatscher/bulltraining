@@ -1,0 +1,50 @@
+{
+  "goal_kind": "swim_distance",
+  "label": "Schwimmstrecke",
+  "sports": {
+    "swim": 0.8,
+    "run": 0.2
+  },
+  "min_weekly_hours": 3,
+  "taper_weeks": 1,
+  "phase_split": {
+    "base": 0.5,
+    "build": 0.3,
+    "specific": 0.2
+  },
+  "long_session_max_min": {
+    "swim": 90,
+    "run": 60
+  },
+  "key_intensity": {
+    "base": "tempo",
+    "build": "threshold",
+    "specific": "threshold"
+  },
+  "max_sessions_per_week": {
+    "swim": 3,
+    "ride": 4,
+    "run": 5,
+    "strength": 2,
+    "other": 2
+  },
+  "typical_session_min": {
+    "swim": 45,
+    "ride": 75,
+    "run": 50,
+    "strength": 45,
+    "other": 45
+  },
+  "long_share": {
+    "ride": 0.4,
+    "run": 0.35,
+    "swim": 0.35
+  },
+  "continuous_focus_intensity": {
+    "aerobic": "tempo",
+    "ftp": "threshold",
+    "speed": "vo2",
+    "health": "tempo"
+  },
+  "_comment": "Vorlage je goal_kind. Werte sind Startpunkte, keine Wissenschaft – anpassen statt im Code ändern."
+}

@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Leistung{% endblock %}
+{% block content %}
+<h1>Leistungszustand <span class="muted small">Stand {{ state.date }}</span></h1>
+
+{% if state.needs_test %}
+<div class="flash err">Kein gültiger Leistungstest für: {{ state.needs_test|join(', ') }}. Der Plan setzt zuerst einen Test an und hält harte Einheiten dieser Sportart zurück.</div>
+{% endif %}
+{% for m in state.intervals_mismatch %}<div class="flash err">Abweichung zu intervals.icu: {{ m }} – dort in den Sport-Einstellungen angleichen, damit Uhr und Plan dieselben Ziele nutzen.</div>{% endfor %}
+
+<div class="grid">
+{% for key, m in state.metrics.items() %}
+  {% set t = state.tests[m.sport] %}
+  <div class="card">
+    <div class="row" style="justify-content:space-between"><span class="muted small">{{ m.label }}</span><span class="pill {{ t.status }}">{{ {'valid':'gültig','due_soon':'bald fällig','stale':'veraltet','missing':'kein Test'}[t.status] }}</span></div>
+    <div class="big">{{ m.display or '–' }}</div>
+    {% if m.change_pct is not none %}
+      <div class="small {{ 'ok' if m.improved else 'bad' }}">{{ '▲' if m.improved else '▼' }} {{ m.change_pct|abs }} % gegenüber {{ m.previous_display }}</div>
+    {% endif %}
+    <div class="small muted">{% if m.tested_on %}getestet {{ m.tested_on }} · gültig bis {{ t.valid_until }}{% else %}noch nie getestet{% endif %}</div>
+    {% if key == 'ftp_w' and state.ftp_w_per_kg %}<div class="small">{{ state.ftp_w_per_kg }} W/kg</div>{% endif %}
+    {% if m.history|length > 1 %}<canvas class="spark" data-key="{{ key }}" height="60"></canvas>{% endif %}
+  </div>
+{% endfor %}
+  <div class="card">
+    <div class="muted small">Fitness (CTL Ausdauer)</div>
+    <div class="big">{{ state.fitness.ctl_endurance }}</div>
+    <div class="small muted">Form {{ state.fitness.form_endurance }} · Ramp 7 T {{ state.fitness.ctl_ramp_7d }}{% if state.max_hr %} · HFmax {{ state.max_hr|int }}{% endif %}</div>
+  </div>
+</div>
+
+<h2>Aktueller Trainingsumfang und Belastbarkeit</h2>
+<div class="grid">
+  <div class="card"><div class="muted small">Ø Ausdauer letzte {{ baseline.weeks }} Wochen</div>
+    <div class="big">{{ baseline.avg_endurance_hours }} h</div>
+    <div class="small muted">Last {{ baseline.avg_endurance_load }} / Woche · {{ baseline.load_per_hour or '–' }} je h · Daten: {{ baseline.data_quality }}</div></div>
+  <div class="card"><div class="muted small">Acute:Chronic (letzte Woche : Schnitt)</div>
+    {% set r = baseline.acwr_last_week %}
+    <div class="big {{ '' if r is none else ('bad' if r > 1.3 else ('warn' if r < 0.8 else 'ok')) }}">{{ r or '–' }}</div>
+    <div class="small muted">0,8–1,3 gilt als verträglicher Bereich</div></div>
+  <div class="card"><div class="muted small">Längste Einheiten (4 Wochen)</div>
+    {% for s, v in baseline.longest_min_by_sport.items() %}<div>{{ s }}: {{ v }} min</div>{% else %}<div class="muted">–</div>{% endfor %}
+    <div class="small muted">Kraft: {{ baseline.strength_sessions_per_week }} × / Woche</div></div>
+  {% if next_targets %}
+  <div class="card"><div class="muted small">Nächste Woche ({{ next_targets.context.week_type }}, {{ next_targets.context.phase }})</div>
+    <div class="big">{{ next_targets.target_hours }} h</div>
+    <div class="small">Lastkorridor {{ next_targets.load_corridor.lower|round|int }}–{{ next_targets.load_corridor.upper|round|int }}</div>
+    <div class="small muted">Referenz: {{ next_targets.reference.load|round|int }} ({{ next_targets.reference.source }})</div></div>
+  {% endif %}
+</div>
+<div class="card"><canvas id="weekly" height="80"></canvas>
+<div class="small muted">Balken: absolvierte bzw. geplante Ausdauerstunden je Woche. Linie: Last. Der Plan steigert höchstens um den eingestellten Prozentsatz und fällt in Belastungswochen nicht unter die Untergrenze.</div></div>
+
+{% if readiness and readiness.notes %}
+<div class="card"><h3>Plan „{{ plan.name }}“ – Startklar?</h3><ul>{% for n in readiness.notes %}<li>{{ n }}</li>{% endfor %}</ul></div>
+{% endif %}
+
+<h2>Leistungstest erfassen</h2>
+<form class="card" method="post" action="/performance/test" id="testform">
+  <div class="row">
+    <div><label>Datum</label><input type="date" name="date" value="{{ today.isoformat() }}" required></div>
+    <div><label>Protokoll</label><select name="protocol" id="protocol">
+      {% for p in protocols %}<option value="{{ p.protocol }}">{{ p.name }} ({{ p.sport }})</option>{% endfor %}
+    </select></div>
+    <div><label>Notiz</label><input name="notes" placeholder="Bedingungen, Gefühl"></div>
+  </div>
+  {% for p in protocols %}
+  <div class="proto" data-protocol="{{ p.protocol }}" style="display:none">
+    <p class="small muted">{{ p.summary }}</p>
+    <div class="row">
+    {% for name, i in p.inputs.items() %}
+      <div><label>{{ i.label }}{% if i.required %} *{% endif %}</label><input name="{{ p.protocol }}__{{ name }}" {% if i.required %}data-required="1"{% endif %} style="width:140px"></div>
+    {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+  <p><button class="primary">Test speichern und Schwellen übernehmen</button></p>
+</form>
+
+<h2>Testverlauf</h2>
+<div class="card scroll"><table>
+<tr><th>Datum</th><th>Sportart</th><th>Protokoll</th><th>Messwerte</th><th>Ergebnis</th><th></th></tr>
+{% for t in tests %}
+<tr><td>{{ t.date }}</td><td>{{ t.sport }}</td><td>{{ t.protocol }}</td>
+<td class="small">{% for k, v in t.inputs.items() %}{{ k }}={{ v }} {% endfor %}</td>
+<td class="small">{% for k, v in t.results.items() %}{{ k }}=<b>{{ v|pace if 'pace' in k else (v|pace('/100m') if 'css' in k else v) }}</b> {% endfor %}</td>
+<td><form class="inline" method="post" action="/performance/test/{{ t.id }}/delete" onsubmit="return confirm('Test löschen?')"><button class="danger">×</button></form></td></tr>
+{% else %}<tr><td colspan="6" class="muted">Noch keine Tests. Der erste Test ist die Grundlage für Zonen und Plan.</td></tr>{% endfor %}
+</table></div>
+
+<h2>Zonen aus den aktuellen Tests</h2>
+<div class="grid">
+{% for name, rows in state.zones.items() %}
+<div class="card"><h3>{{ {'ride_power':'Rad Leistung (W)','run_pace':'Lauf Pace','run_hr':'Lauf Puls (LTHR)','swim_css':'Schwimmen (CSS)'}[name] }}</h3>
+<table>{% for z in rows %}<tr><td>{{ z.zone }}</td><td>{{ z['from'] if z['from'] is not none else '' }}{% if z['from'] is not none and z['to'] is not none %} – {% endif %}{{ z['to'] if z['to'] is not none else '' }}</td></tr>{% endfor %}</table></div>
+{% else %}<p class="muted">Zonen erscheinen nach dem ersten Test.</p>{% endfor %}
+</div>
+
+<script>
+(() => {
+  const sel = document.getElementById('protocol');
+  const show = () => document.querySelectorAll('.proto').forEach(el => {
+    const on = el.dataset.protocol === sel.value;
+    el.style.display = on ? '' : 'none';
+    el.querySelectorAll('input').forEach(i => i.required = on && i.dataset.required === '1');
+  });
+  sel.addEventListener('change', show); show();
+
+  const metrics = {{ state.metrics|tojson_safe }};
+  document.querySelectorAll('canvas.spark').forEach(c => {
+    const m = metrics[c.dataset.key];
+    new Chart(c, { type: 'line', data: { labels: m.history.map(h => h.date),
+      datasets: [{ data: m.history.map(h => h.value), borderColor: '#3a7be0', pointRadius: 2, borderWidth: 1.5 }] },
+      options: { animation: false, plugins: { legend: { display: false } },
+        scales: { x: { display: false }, y: { reverse: c.dataset.key.includes('pace') || c.dataset.key.includes('css'), ticks: { maxTicksLimit: 3 } } } } });
+  });
+
+  const s = {{ series|tojson_safe }};
+  const today = '{{ today.isoformat() }}';
+  new Chart(document.getElementById('weekly'), {
+    data: { labels: s.map(w => w.week_start.slice(5)), datasets: [
+      { type: 'bar', label: 'absolviert (h)', data: s.map(w => w.week_start <= today ? w.done_hours : null), backgroundColor: '#3a7be0' },
+      { type: 'bar', label: 'geplant (h)', data: s.map(w => w.planned_hours || null), backgroundColor: 'rgba(58,123,224,.3)' },
+      { type: 'line', label: 'Last absolviert', data: s.map(w => w.week_start <= today ? w.done_load : null), borderColor: '#e0703a', yAxisID: 'y2', pointRadius: 2 },
+      { type: 'line', label: 'Last geplant', data: s.map(w => w.planned_load || null), borderColor: '#e0703a', borderDash: [4,3], yAxisID: 'y2', pointRadius: 2 },
+    ]},
+    options: { animation: false, scales: { y: { title: { display: true, text: 'h' } }, y2: { position: 'right', grid: { drawOnChartArea: false } } } }
+  });
+})();
+</script>
+{% endblock %}

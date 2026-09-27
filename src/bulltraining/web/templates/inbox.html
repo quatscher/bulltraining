@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Posteingang{% endblock %}
+{% block content %}
+<div class="row" style="justify-content:space-between">
+  <h1>Posteingang</h1>
+  <div class="row">
+    <form class="inline" method="post" action="/sync"><button>Jetzt synchronisieren</button></form>
+    <form class="inline" method="post" action="/publish"><button class="primary">Veröffentlichen ({{ unpublished }})</button></form>
+  </div>
+</div>
+
+<h2>Offene Planänderungen</h2>
+{% for c in pending %}
+<div class="card">
+  <div class="row" style="justify-content:space-between">
+    <div><b>#{{ c.id }}</b> <span class="muted small">{{ c.created_at }} · {{ c.actor }} · {{ c.tool }}</span></div>
+    <div class="row">
+      <form class="inline" method="post" action="/changes/{{ c.id }}/apply"><button class="primary">Bestätigen</button></form>
+      <form class="inline" method="post" action="/changes/{{ c.id }}/reject"><button>Verwerfen</button></form>
+    </div>
+  </div>
+  <p><b>Grund:</b> {{ c.reason }}</p>
+  <ul>{% for line in c.summary %}<li>{{ line }}</li>{% endfor %}</ul>
+  {% if c.warnings %}<div class="warn small">{% for w in c.warnings %}⚠ {{ w }}<br>{% endfor %}</div>{% endif %}
+  <details><summary class="small muted">Details (neue Einheiten)</summary>
+    {% for a in c.diff.after if not a._deleted %}<div class="small"><b>{{ a.date }} {{ a.title }}</b> · {{ a.duration_s|minutes }} · Last {{ a.target_load }}<pre>{{ a.description }}</pre></div>{% endfor %}
+  </details>
+</div>
+{% else %}<p class="muted">Keine offenen Vorschläge.</p>{% endfor %}
+
+<h2>Mögliche Dubletten</h2>
+{% for p in pairs %}
+<div class="card">
+  <div class="grid">
+    <div><div class="muted small">Lokal erfasst</div><a href="/activity/{{ p.local_id }}">{{ p.local_date }} {{ p.local_name }}</a><br>{{ p.local_duration_s|minutes }} · RPE {{ p.local_rpe }} · Last {{ p.local_load }}</div>
+    <div><div class="muted small">Aus intervals.icu</div><a href="/activity/{{ p.ext_id }}">{{ p.ext_date }} {{ p.ext_name }}</a><br>{{ p.ext_duration_s|minutes }} · Puls {{ p.ext_hr_avg or '–' }} · Last {{ p.ext_load }}</div>
+  </div>
+  <div class="row" style="margin-top:8px">
+    <form class="inline" method="post" action="/duplicates/{{ p.local_id }}/keep_external"><button>Externe behalten</button></form>
+    <form class="inline" method="post" action="/duplicates/{{ p.local_id }}/keep_local"><button>Lokale behalten</button></form>
+    <form class="inline" method="post" action="/duplicates/{{ p.local_id }}/not_duplicate"><button>Kein Duplikat</button></form>
+  </div>
+</div>
+{% else %}<p class="muted">Keine offenen Dublettenpaare.</p>{% endfor %}
+
+{% if publish_errors %}
+<h2>Upload-Fehler</h2>
+<div class="card">{% for e in publish_errors %}<div class="small"><b>{{ e.date }} {{ e.title }}</b>: <span class="bad">{{ e.publish_error }}</span></div>{% endfor %}</div>
+{% endif %}
+
+<h2>Änderungsprotokoll</h2>
+<div class="card scroll"><table>
+<tr><th>#</th><th>Zeit</th><th>Von</th><th>Status</th><th>Grund</th><th>Änderungen</th><th></th></tr>
+{% for c in log %}
+<tr><td>{{ c.id }}</td><td class="small">{{ c.created_at }}</td><td>{{ c.actor }}</td><td>{{ c.status }}</td>
+<td class="small">{{ c.reason }}</td><td class="small">{{ c.summary|join('; ') }}</td>
+<td>{% if c.status == 'applied' and c.tool != 'revert' %}<form class="inline" method="post" action="/changes/{{ c.id }}/revert"><button>Rückgängig</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="7" class="muted">leer</td></tr>{% endfor %}
+</table></div>
+
+<h2>Letzte Syncs</h2>
+<div class="card scroll"><table><tr><th>Start</th><th>ab</th><th>neu</th><th>aktualisiert</th><th>Fehler</th></tr>
+{% for r in runs %}<tr><td class="small">{{ r.started_at }}</td><td>{{ r.from_date }}</td><td>{{ r.n_created or 0 }}</td><td>{{ r.n_updated or 0 }}</td><td class="bad small">{{ r.error or '' }}</td></tr>
+{% else %}<tr><td colspan="5" class="muted">noch kein Sync</td></tr>{% endfor %}</table></div>
+{% endblock %}

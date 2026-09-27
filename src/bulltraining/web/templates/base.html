@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Training{% endblock %} · bulltraining</title>
+<script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.4/dist/htmx.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+:root { --bg:#f7f7f5; --card:#fff; --fg:#1d1d1f; --muted:#6b6b70; --line:#e3e3e0; --accent:#3a7be0;
+        --ok:#2f9e5b; --warn:#c98a12; --bad:#d0463b; }
+@media (prefers-color-scheme: dark) { :root { --bg:#141416; --card:#1e1e21; --fg:#ececec; --muted:#9a9aa0; --line:#2e2e33; } }
+* { box-sizing:border-box; }
+body { margin:0; font:14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--fg); }
+nav { display:flex; gap:4px; padding:10px 16px; background:var(--card); border-bottom:1px solid var(--line); flex-wrap:wrap; align-items:center; }
+nav a { color:var(--fg); text-decoration:none; padding:6px 10px; border-radius:6px; }
+nav a:hover, nav a.on { background:var(--bg); }
+nav .brand { font-weight:700; margin-right:12px; }
+.badge { background:var(--bad); color:#fff; border-radius:9px; padding:0 6px; font-size:12px; margin-left:4px; }
+main { max-width:1200px; margin:0 auto; padding:16px; }
+h1 { font-size:20px; margin:4px 0 14px; } h2 { font-size:16px; margin:22px 0 8px; } h3 { font-size:14px; margin:12px 0 6px; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-bottom:12px; }
+.grid { display:grid; gap:12px; grid-template-columns:repeat(auto-fit, minmax(210px, 1fr)); }
+.muted { color:var(--muted); } .small { font-size:12px; }
+.ok { color:var(--ok); } .warn { color:var(--warn); } .bad { color:var(--bad); }
+.pill { display:inline-block; padding:1px 8px; border-radius:10px; font-size:12px; background:var(--bg); border:1px solid var(--line); }
+.pill.valid { border-color:var(--ok); color:var(--ok); } .pill.due_soon { border-color:var(--warn); color:var(--warn); }
+.pill.stale, .pill.missing { border-color:var(--bad); color:var(--bad); }
+table { border-collapse:collapse; width:100%; } th, td { text-align:left; padding:5px 8px; border-bottom:1px solid var(--line); vertical-align:top; }
+th { font-weight:600; color:var(--muted); font-size:12px; }
+.scroll { overflow-x:auto; }
+button, .btn { font:inherit; padding:5px 12px; border-radius:6px; border:1px solid var(--line); background:var(--card); color:var(--fg); cursor:pointer; text-decoration:none; display:inline-block; }
+button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+button.danger { color:var(--bad); }
+input, select, textarea { font:inherit; padding:5px 8px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); }
+label { display:block; margin:6px 0 2px; font-size:12px; color:var(--muted); }
+.flash { padding:8px 12px; border-radius:8px; margin-bottom:12px; border:1px solid var(--ok); }
+.flash.err { border-color:var(--bad); color:var(--bad); white-space:pre-line; }
+.big { font-size:24px; font-weight:700; }
+.row { display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
+form.inline { display:inline; }
+pre { white-space:pre-wrap; font-size:12px; background:var(--bg); padding:8px; border-radius:6px; margin:4px 0; }
+</style>
+</head>
+<body hx-boost="true">
+<nav>
+  <span class="brand">bulltraining</span>
+  {% set p = request.url.path %}
+  <a href="/calendar" class="{{ 'on' if p.startswith('/calendar') }}">Kalender</a>
+  <a href="/performance" class="{{ 'on' if p.startswith('/performance') }}">Leistung</a>
+  <a href="/form" class="{{ 'on' if p.startswith('/form') }}">Form</a>
+  <a href="/inbox" class="{{ 'on' if p.startswith('/inbox') }}">Posteingang{% if inbox_count %}<span class="badge">{{ inbox_count }}</span>{% endif %}</a>
+  <a href="/plans" class="{{ 'on' if p.startswith('/plans') }}">Pläne</a>
+  <a href="/settings" class="{{ 'on' if p.startswith('/settings') }}">Einstellungen</a>
+</nav>
+<main>
+{% if flash %}<div class="flash">{{ flash }}</div>{% endif %}
+{% if error %}<div class="flash err">{{ error }}</div>{% endif %}
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>
