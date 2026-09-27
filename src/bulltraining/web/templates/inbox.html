@@ -5,8 +5,8 @@
 <div class="row" style="justify-content:space-between">
   <h1>Posteingang</h1>
   <div class="row">
-    <form class="inline" method="post" action="/sync"><button>Jetzt synchronisieren</button></form>
-    <form class="inline" method="post" action="/publish"><button class="primary">Veröffentlichen ({{ unpublished }})</button></form>
+    <form class="inline" method="post" action="{{ root }}/sync"><button>Jetzt synchronisieren</button></form>
+    <form class="inline" method="post" action="{{ root }}/publish"><button class="primary">Veröffentlichen ({{ unpublished }})</button></form>
   </div>
 </div>
 
@@ -16,8 +16,8 @@
   <div class="row" style="justify-content:space-between">
     <div><b>#{{ c.id }}</b> <span class="muted small">{{ c.created_at }} · {{ c.actor }} · {{ c.tool }}</span></div>
     <div class="row">
-      <form class="inline" method="post" action="/changes/{{ c.id }}/apply"><button class="primary">Bestätigen</button></form>
-      <form class="inline" method="post" action="/changes/{{ c.id }}/reject"><button>Verwerfen</button></form>
+      <form class="inline" method="post" action="{{ root }}/changes/{{ c.id }}/apply"><button class="primary">Bestätigen</button></form>
+      <form class="inline" method="post" action="{{ root }}/changes/{{ c.id }}/reject"><button>Verwerfen</button></form>
     </div>
   </div>
   <p><b>Grund:</b> {{ c.reason }}</p>
@@ -62,13 +62,13 @@
 {% for p in pairs %}
 <div class="card">
   <div class="grid">
-    <div><div class="muted small">Lokal erfasst</div><a href="/activity/{{ p.local_id }}">{{ p.local_date }} {{ p.local_name }}</a><br>{{ p.local_duration_s|minutes }} · RPE {{ p.local_rpe }} · Last {{ p.local_load }}</div>
-    <div><div class="muted small">Aus intervals.icu</div><a href="/activity/{{ p.ext_id }}">{{ p.ext_date }} {{ p.ext_name }}</a><br>{{ p.ext_duration_s|minutes }} · Puls {{ p.ext_hr_avg or '–' }} · Last {{ p.ext_load }}</div>
+    <div><div class="muted small">Lokal erfasst</div><a href="{{ root }}/activity/{{ p.local_id }}">{{ p.local_date }} {{ p.local_name }}</a><br>{{ p.local_duration_s|minutes }} · RPE {{ p.local_rpe }} · Last {{ p.local_load }}</div>
+    <div><div class="muted small">Aus intervals.icu</div><a href="{{ root }}/activity/{{ p.ext_id }}">{{ p.ext_date }} {{ p.ext_name }}</a><br>{{ p.ext_duration_s|minutes }} · Puls {{ p.ext_hr_avg or '–' }} · Last {{ p.ext_load }}</div>
   </div>
   <div class="row" style="margin-top:8px">
-    <form class="inline" method="post" action="/duplicates/{{ p.local_id }}/keep_external"><button>Externe behalten</button></form>
-    <form class="inline" method="post" action="/duplicates/{{ p.local_id }}/keep_local"><button>Lokale behalten</button></form>
-    <form class="inline" method="post" action="/duplicates/{{ p.local_id }}/not_duplicate"><button>Kein Duplikat</button></form>
+    <form class="inline" method="post" action="{{ root }}/duplicates/{{ p.local_id }}/keep_external"><button>Externe behalten</button></form>
+    <form class="inline" method="post" action="{{ root }}/duplicates/{{ p.local_id }}/keep_local"><button>Lokale behalten</button></form>
+    <form class="inline" method="post" action="{{ root }}/duplicates/{{ p.local_id }}/not_duplicate"><button>Kein Duplikat</button></form>
   </div>
 </div>
 {% else %}<p class="muted">Keine offenen Dublettenpaare.</p>{% endfor %}
@@ -77,7 +77,7 @@
 <h2>Upload-Fehler</h2>
 <div class="card">{% for e in publish_errors %}<div class="small" style="margin:4px 0"><b>{{ e.date }} {{ e.title }}</b>: <span class="bad">{{ e.publish_error }}</span>
   {% if e.publish_unknown %}<br><span class="muted">Antwort von intervals.icu ging verloren – dort prüfen. Wenn die Einheit fehlt:</span>
-  <form class="inline" method="post" action="/sessions/{{ e.id }}/publish-retry"><button>Erneut senden</button></form>{% endif %}</div>{% endfor %}</div>
+  <form class="inline" method="post" action="{{ root }}/sessions/{{ e.id }}/publish-retry"><button>Erneut senden</button></form>{% endif %}</div>{% endfor %}</div>
 {% endif %}
 
 <h2>Änderungsprotokoll</h2>
@@ -86,7 +86,7 @@
 {% for c in log %}
 <tr><td>{{ c.id }}</td><td class="small">{{ c.created_at }}</td><td>{{ c.actor }}</td><td>{{ c.status }}</td>
 <td class="small">{{ c.reason }}</td><td class="small">{{ c.summary|join('; ') }}</td>
-<td>{% if c.status == 'applied' and c.tool != 'revert' %}<form class="inline" method="post" action="/changes/{{ c.id }}/revert"><button>Rückgängig</button></form>{% endif %}</td></tr>
+<td>{% if c.status == 'applied' and c.tool != 'revert' %}<form class="inline" method="post" action="{{ root }}/changes/{{ c.id }}/revert"><button>Rückgängig</button></form>{% endif %}</td></tr>
 {% else %}<tr><td colspan="7" class="muted">leer</td></tr>{% endfor %}
 </table></div>
 

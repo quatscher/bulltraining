@@ -5,10 +5,10 @@
 <div class="row" style="justify-content:space-between">
   <h1>Kalender {% if plan %}<span class="muted small">· {{ plan.name }}</span>{% endif %}</h1>
   <div class="row">
-    <a class="btn" href="/calendar?week={{ prev }}">←</a>
-    <a class="btn" href="/calendar">Heute</a>
-    <a class="btn" href="/calendar?week={{ next }}">→</a>
-    {% if plan %}<form class="inline" method="post" action="/plan/generate"><button class="primary">Nächste Woche generieren</button></form>{% endif %}
+    <a class="btn" href="{{ root }}/calendar?week={{ prev }}">←</a>
+    <a class="btn" href="{{ root }}/calendar">Heute</a>
+    <a class="btn" href="{{ root }}/calendar?week={{ next }}">→</a>
+    {% if plan %}<form class="inline" method="post" action="{{ root }}/plan/generate"><button class="primary">Nächste Woche generieren</button></form>{% endif %}
   </div>
 </div>
 {% for w in weeks %}
@@ -23,7 +23,7 @@
   <div class="day {{ 'today' if d.date == today }}">
     <h4>{{ weekday_de[loop.index0] }} {{ d.date.strftime('%d.%m.') }}</h4>
     {% for s in d.sessions %}
-      <a class="s {{ s.status }}" href="/session/{{ s.id }}" style="border-color:{{ sport_color.get(s.sport) }}" title="Details anzeigen">
+      <a class="s {{ s.status }}" href="{{ root }}/session/{{ s.id }}" style="border-color:{{ sport_color.get(s.sport) }}" title="Details anzeigen">
         <b>{{ s.title }}</b><br>{{ s.duration_s|minutes }}{% if s.target_load %} · {{ s.target_load|round|int }}{% endif %}
         <span class="muted">· {{ s.status }}</span>
         {% if s.category == 'TEST' %}<span class="pill due_soon">Test</span>{% endif %}
@@ -34,7 +34,7 @@
     {% endfor %}
     {% for a in d.activities %}
       <div class="a" style="border-color:{{ sport_color.get(a.sport) }}">
-        <a href="/activity/{{ a.id }}">✓ {{ a.name or a.sport }}</a><br>
+        <a href="{{ root }}/activity/{{ a.id }}">✓ {{ a.name or a.sport }}</a><br>
         {{ a.duration_s|minutes }}{% if a.load %} · {{ a.load|round|int }} ({{ a.load_method }}){% endif %}
         {% if a.excluded %}<span class="muted">· ausgeschlossen</span>{% endif %}
         {% if a.possible_duplicate_of %}<span class="warn">· Dublette?</span>{% endif %}
@@ -53,7 +53,7 @@
 {% endfor %}
 
 <h2>Aktivität erfassen (z. B. Krafttraining)</h2>
-<form class="card row" method="post" action="/activity">
+<form class="card row" method="post" action="{{ root }}/activity">
   <div><label>Datum</label><input type="date" name="date" value="{{ today.isoformat() }}" required></div>
   <div><label>Sportart</label><select name="sport">{% for s in ['strength','run','ride','swim','other'] %}<option>{{ s }}</option>{% endfor %}</select></div>
   <div><label>Dauer (min)</label><input type="number" name="duration_min" min="1" required style="width:90px"></div>

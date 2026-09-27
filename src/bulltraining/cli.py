@@ -44,6 +44,26 @@ def cmd_mcp(args) -> None:
     main()
 
 
+def cmd_export(args) -> None:
+    """Konsistente Kopie der Datenbank (auch während der Server läuft), z. B. für den Umzug ins Add-on."""
+    import sqlite3
+    from pathlib import Path
+    target = Path(args.target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        sys.exit(f"{target} existiert bereits.")
+    src = connect()
+    dst = sqlite3.connect(target)
+    src.backup(dst)
+    dst.close()
+    print(f"Exportiert nach {target}")
+
+
+def cmd_addon(args) -> None:
+    from .addon import main
+    main()
+
+
 def cmd_state(args) -> None:
     from . import metrics, performance
     c = connect()
@@ -140,6 +160,10 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--port", type=int, default=8000)
     s.set_defaults(func=cmd_serve)
     sub.add_parser("mcp", help="MCP-Server über stdio").set_defaults(func=cmd_mcp)
+    s = sub.add_parser("export", help="Datenbank konsistent kopieren, z. B. als import.db für das Home-Assistant-Add-on")
+    s.add_argument("target")
+    s.set_defaults(func=cmd_export)
+    sub.add_parser("addon", help="Betrieb als Home-Assistant-Add-on (Web, MCP über HTTP, Sync)").set_defaults(func=cmd_addon)
     sub.add_parser("state", help="Form, Trainingsumfang und Leistungszustand ausgeben").set_defaults(func=cmd_state)
     s = sub.add_parser("test", help="Leistungstest erfassen: test ride_ftp20 avg_power_20min_w=265")
     s.add_argument("protocol")

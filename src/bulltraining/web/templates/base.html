@@ -102,12 +102,12 @@ function zoneChart(el, labels, rows, divisor, unit) {
 <nav>
   <span class="brand">bulltraining</span>
   {% set p = request.url.path %}
-  <a href="/calendar" class="{{ 'on' if p.startswith('/calendar') }}">Kalender</a>
-  <a href="/performance" class="{{ 'on' if p.startswith('/performance') }}">Leistung</a>
-  <a href="/form" class="{{ 'on' if p.startswith('/form') }}">Form</a>
-  <a href="/inbox" class="{{ 'on' if p.startswith('/inbox') }}">Posteingang{% if inbox_count %}<span class="badge">{{ inbox_count }}</span>{% endif %}</a>
-  <a href="/plans" class="{{ 'on' if p.startswith('/plans') }}">Pläne</a>
-  <a href="/settings" class="{{ 'on' if p.startswith('/settings') }}">Einstellungen</a>
+  <a href="{{ root }}/calendar" class="{{ 'on' if p.startswith('/calendar') }}">Kalender</a>
+  <a href="{{ root }}/performance" class="{{ 'on' if p.startswith('/performance') }}">Leistung</a>
+  <a href="{{ root }}/form" class="{{ 'on' if p.startswith('/form') }}">Form</a>
+  <a href="{{ root }}/inbox" class="{{ 'on' if p.startswith('/inbox') }}">Posteingang{% if inbox_count %}<span class="badge">{{ inbox_count }}</span>{% endif %}</a>
+  <a href="{{ root }}/plans" class="{{ 'on' if p.startswith('/plans') }}">Pläne</a>
+  <a href="{{ root }}/settings" class="{{ 'on' if p.startswith('/settings') }}">Einstellungen</a>
 </nav>
 <main>
 {% if flash %}<div class="flash">{{ flash }}</div>{% endif %}

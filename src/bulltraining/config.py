@@ -8,6 +8,7 @@ DB_PATH = Path(os.environ.get("BULLTRAINING_DB", "data/bulltraining.db"))
 INTERVALS_API_KEY = os.environ.get("INTERVALS_API_KEY", "")
 INTERVALS_ATHLETE_ID = os.environ.get("INTERVALS_ATHLETE_ID", "0")
 INTERVALS_BASE_URL = os.environ.get("INTERVALS_BASE_URL", "https://intervals.icu")
+MCP_INFO: dict | None = None  # im Add-on-Betrieb: Port, Pfad und Token des MCP-Servers (für die Einstellungsseite)
 
 # Browserähnlicher User-Agent wegen Cloudflare (siehe architecture.md, "Sync").
 USER_AGENT = (

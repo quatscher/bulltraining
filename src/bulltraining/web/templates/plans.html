@@ -9,7 +9,7 @@
       <div class="small muted">{{ active.goal_type }}{% if active.goal_date %} · Ziel {{ active.goal_date }} ({{ active.priority }}){% endif %}
         · {{ active.goal_kind or 'generisch' }}{% if active.focus %} · Fokus {{ active.focus }}{% endif %}
         · {{ active.sports|join(', ') }} · {{ active.weekly_hours }} h/Woche · Start {{ active.start_date }}</div></div>
-    <form class="inline" method="post" action="/plans/{{ active.id }}/archive" onsubmit="return confirm('Plan archivieren?')"><button>Archivieren</button></form>
+    <form class="inline" method="post" action="{{ root }}/plans/{{ active.id }}/archive" onsubmit="return confirm('Plan archivieren?')"><button>Archivieren</button></form>
   </div>
   {% if readiness %}
   <h3>Grundlage</h3>
@@ -21,7 +21,7 @@
 {% endif %}
 
 <h2>Neuer Plan</h2>
-<form class="card" method="post" action="/plans">
+<form class="card" method="post" action="{{ root }}/plans">
   <div class="row">
     <div><label>Name</label><input name="name" required></div>
     <div><label>Zieltyp</label><select name="goal_type" id="goal_type"><option value="event">Wettkampf (event)</option><option value="continuous">kontinuierlich</option></select></div>

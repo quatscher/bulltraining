@@ -9,8 +9,8 @@
   {% if a.power_avg %}<div class="card"><div class="muted small">Leistung Ø</div><div class="big">{{ a.power_avg }} W</div></div>{% endif %}
   {% if a.distance_m %}<div class="card"><div class="muted small">Distanz</div><div class="big">{{ (a.distance_m / 1000)|round(2) }} km</div></div>{% endif %}
 </div>
-{% if a.possible_duplicate_of %}<div class="flash err">Mögliche Dublette von <a href="/activity/{{ a.possible_duplicate_of }}">#{{ a.possible_duplicate_of }}</a> – im Posteingang auflösen.</div>{% endif %}
-<form class="card" method="post" action="/activity/{{ a.id }}">
+{% if a.possible_duplicate_of %}<div class="flash err">Mögliche Dublette von <a href="{{ root }}/activity/{{ a.possible_duplicate_of }}">#{{ a.possible_duplicate_of }}</a> – im Posteingang auflösen.</div>{% endif %}
+<form class="card" method="post" action="{{ root }}/activity/{{ a.id }}">
   <div class="row">
     {% if a.source == 'local' %}
     <div><label>Name</label><input name="name" value="{{ a.name or '' }}"></div>

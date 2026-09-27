@@ -2,7 +2,7 @@
 {% import "_macros.html" as mx with context %}
 {% block title %}{{ s.title }}{% endblock %}
 {% block content %}
-<p class="small"><a class="muted" href="/calendar?week={{ week }}">← Kalender {{ week }}</a></p>
+<p class="small"><a class="muted" href="{{ root }}/calendar?week={{ week }}">← Kalender {{ week }}</a></p>
 <div class="row" style="justify-content:space-between; align-items:start">
   <div>
     <h1 style="margin-bottom:4px; border-left:6px solid {{ sport_color.get(s.sport) }}; padding-left:10px">{{ s.title }}</h1>
@@ -11,11 +11,11 @@
       {% if s.category == 'TEST' %}<span class="pill due_soon">Leistungstest</span>{% endif %}
       {% if s.category == 'RACE' %}<span class="pill">Wettkampf {{ s.race_priority }}</span>{% endif %}</div>
   </div>
-  {% if s.activity_id %}<a class="btn" href="/activity/{{ s.activity_id }}">Absolvierte Aktivität ansehen →</a>{% endif %}
+  {% if s.activity_id %}<a class="btn" href="{{ root }}/activity/{{ s.activity_id }}">Absolvierte Aktivität ansehen →</a>{% endif %}
 </div>
 
 {% if basis %}<p class="small muted">Zielwerte aus deinen aktuellen Tests: {{ basis|join(' · ') }}</p>{% endif %}
-{% if s.category == 'TEST' %}<div class="flash">Nach dem Test das Ergebnis unter <a href="/performance">Leistung</a> eintragen – es setzt die neuen Schwellen und Zonen.</div>{% endif %}
+{% if s.category == 'TEST' %}<div class="flash">Nach dem Test das Ergebnis unter <a href="{{ root }}/performance">Leistung</a> eintragen – es setzt die neuen Schwellen und Zonen.</div>{% endif %}
 
 <h2>Ablauf</h2>
 {{ mx.steps(steps) }}

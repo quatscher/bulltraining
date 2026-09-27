@@ -42,6 +42,26 @@ zur Last und zum Anteil ihrer Sportart. Inhalt und Dauer der Krafteinheiten komm
 7. **Einheit im Detail:** Klick auf eine geplante Einheit im Kalender zeigt den Ablauf Schritt für Schritt mit konkreten Zielen aus den aktuellen Tests (Dauer, Pace bzw. Watt, Pulsbereich), Wiederholungsblöcke und Zeit je Zone. Im Chat liefert `get_session` dasselbe als Text.
 8. **Veröffentlichen** (`bulltraining publish` oder Button): bestätigte Einheiten der nächsten 14 Tage gehen nach intervals.icu und von dort auf die Uhr.
 
+## Betrieb auf Home Assistant (Raspberry Pi)
+
+Als lokales Home-Assistant-Add-on (`homeassistant/bulltraining`): Weboberfläche in der HA-Seitenleiste (Ingress,
+über den HA-Login geschützt), MCP für Claude über HTTP auf Port 8765 mit Token, Sync im festen Intervall. Die
+Datenbank liegt in `/data` des Add-ons und ist in den HA-Backups enthalten.
+
+1. Im Samba-Add-on die Freigabe `addons` aktivieren (Einstellungen → Add-ons → Samba share → Konfiguration →
+   `enabled_shares` um `addons` ergänzen, Add-on neu starten).
+2. Add-on bauen und kopieren: `python homeassistant/build_addon.py \\homeassistant\addons`
+3. Bisherige Daten übernehmen (optional, vor dem ersten Start):
+   `bulltraining export \\homeassistant\share\bulltraining\import.db`
+4. HA: Einstellungen → Add-ons → Add-on-Store → ⋮ → *Nach Updates suchen* → unter *Lokale Add-ons*
+   „bulltraining“ installieren, API-Key in der Konfiguration eintragen, starten.
+5. Claude verbinden: die fertigen Befehle stehen in der Weboberfläche unter *Einstellungen* (URL und Token).
+
+Updates: Version in `pyproject.toml` erhöhen, Schritt 2 wiederholen, in HA *Neu erstellen*.
+
+Hinweis: SQLite gehört auf den lokalen Datenträger des Add-ons, nicht auf eine Netzwerkfreigabe – über SMB sind
+Dateisperren und der WAL-Modus nicht zuverlässig.
+
 ## MCP (Claude Desktop / Claude Code)
 
 ```json

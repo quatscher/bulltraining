@@ -2,8 +2,20 @@
 {% block title %}Einstellungen{% endblock %}
 {% block content %}
 <h1>Einstellungen</h1>
+{% if mcp %}
+<div class="card"><h3>Claude-Zugang (MCP)</h3>
+  {% set h = (host or 'homeassistant.local').split(':')[0] %}
+  <p class="small">URL: <code>http://{{ h }}:{{ mcp.port }}{{ mcp.path }}</code> · Token: <code id="tok">{{ mcp.token }}</code></p>
+  <p class="small warn">Löst der Hostname auf deinem Rechner zuerst per IPv6 auf, ist der Port nicht erreichbar (Docker-Portfreigaben
+    gelten unter Home Assistant OS nur für IPv4). Dann die IPv4-Adresse des Pi einsetzen und sie im Router fest vergeben.</p>
+  <p class="small muted">Claude Code:</p>
+  <pre>claude mcp add --transport http bulltraining http://{{ h }}:{{ mcp.port }}{{ mcp.path }} --header "Authorization: Bearer {{ mcp.token }}"</pre>
+  <p class="small muted">Claude Desktop (claude_desktop_config.json, benötigt Node.js):</p>
+  <pre>"bulltraining": {"command": "npx", "args": ["-y", "mcp-remote", "http://{{ h }}:{{ mcp.port }}{{ mcp.path }}", "--allow-http", "--header", "Authorization: Bearer {{ mcp.token }}"]}</pre>
+</div>
+{% endif %}
 <p class="muted small">Grenzwerte für Progression und Tests. Schwellenwerte werden normalerweise durch Leistungstests gesetzt.</p>
-<form class="card" method="post" action="/settings">
+<form class="card" method="post" action="{{ root }}/settings">
 <table>
 {% for k, v in settings.items() %}
 <tr><td><label for="{{ k }}" style="margin:0">{{ k }}</label></td><td><input id="{{ k }}" name="{{ k }}" value="{{ v }}"></td></tr>

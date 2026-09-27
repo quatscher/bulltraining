@@ -56,7 +56,7 @@
 {% endif %}
 
 <h2>Leistungstest erfassen</h2>
-<form class="card" method="post" action="/performance/test" id="testform">
+<form class="card" method="post" action="{{ root }}/performance/test" id="testform">
   <div class="row">
     <div><label>Datum</label><input type="date" name="date" value="{{ today.isoformat() }}" required></div>
     <div><label>Protokoll</label><select name="protocol" id="protocol">
@@ -84,7 +84,7 @@
 <tr><td>{{ t.date }}</td><td>{{ t.sport }}</td><td>{{ t.protocol }}</td>
 <td class="small">{% for k, v in t.inputs.items() %}{{ k }}={{ v }} {% endfor %}</td>
 <td class="small">{% for k, v in t.results.items() %}{{ k }}=<b>{{ v|pace if 'pace' in k else (v|pace('/100m') if 'css' in k else v) }}</b> {% endfor %}</td>
-<td><form class="inline" method="post" action="/performance/test/{{ t.id }}/delete" onsubmit="return confirm('Test löschen?')"><button class="danger">×</button></form></td></tr>
+<td><form class="inline" method="post" action="{{ root }}/performance/test/{{ t.id }}/delete" onsubmit="return confirm('Test löschen?')"><button class="danger">×</button></form></td></tr>
 {% else %}<tr><td colspan="6" class="muted">Noch keine Tests. Der erste Test ist die Grundlage für Zonen und Plan.</td></tr>{% endfor %}
 </table></div>
 

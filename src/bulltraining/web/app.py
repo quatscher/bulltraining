@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import re
+from contextvars import ContextVar
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
@@ -11,7 +13,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 
-from .. import activities, duplicates, metrics, performance, plans
+from .. import activities, config, duplicates, metrics, performance, plans
 from ..db import SettingError, all_settings, set_setting, thread_connection, transaction, validate_setting
 from ..intervals_client import IntervalsClient, IntervalsError
 from ..periodization import available_templates, week_context, week_targets, weekly_series
@@ -22,17 +24,35 @@ from ..workout_view import Thresholds, workout_steps
 app = FastAPI(title="bulltraining")
 
 
+ROOT_PATH: ContextVar[str] = ContextVar("root_path", default="")
+_INGRESS_PATH = re.compile(r"^/api/hassio_ingress/[A-Za-z0-9_\-]+$")
+
+
+def _same_origin(request: Request) -> bool:
+    """Stammt eine schreibende Anfrage von dieser Seite selbst? Moderne Browser melden das per Sec-Fetch-Site;
+    sonst Origin/Referer gegen den Host vergleichen (hinter dem Ingress-Proxy von Home Assistant gegen den
+    weitergereichten Host). Anfragen ganz ohne Browser-Header (CLI, Tests) sind erlaubt."""
+    from urllib.parse import urlparse
+    site = request.headers.get("sec-fetch-site")
+    if site is not None:
+        return site in ("same-origin", "none")
+    origin = request.headers.get("origin") or request.headers.get("referer")
+    if not origin:
+        return True
+    hosts = {request.headers.get("host"), request.headers.get("x-forwarded-host")}
+    return urlparse(origin).netloc in hosts
+
+
 @app.middleware("http")
-async def same_origin_writes(request: Request, call_next: Any) -> Any:
-    """Schreibende Anfragen nur von dieser Seite selbst. Ohne diese Prüfung könnte eine fremde Website im selben
-    Browser per Formular-POST Einstellungen ändern oder Vorschläge bestätigen."""
-    if request.method not in ("GET", "HEAD", "OPTIONS"):
-        from urllib.parse import urlparse
-        if request.headers.get("sec-fetch-site") == "cross-site":
-            return PlainTextResponse("Schreibzugriff nur von bulltraining selbst.", status_code=403)
-        origin = request.headers.get("origin") or request.headers.get("referer")
-        if origin and urlparse(origin).netloc != request.headers.get("host"):
-            return PlainTextResponse("Schreibzugriff nur von bulltraining selbst.", status_code=403)
+async def ingress_and_origin(request: Request, call_next: Any) -> Any:
+    """Home-Assistant-Ingress: die App läuft unter /api/hassio_ingress/<token>/…; der Proxy meldet den Präfix in
+    X-Ingress-Path. Links und Weiterleitungen bekommen ihn vorangestellt.
+    Schreibende Anfragen nur von dieser Seite selbst – sonst könnte eine fremde Website im selben Browser per
+    Formular-POST Einstellungen ändern oder Vorschläge bestätigen."""
+    ingress = request.headers.get("x-ingress-path", "")
+    ROOT_PATH.set(ingress if _INGRESS_PATH.match(ingress) else "")
+    if request.method not in ("GET", "HEAD", "OPTIONS") and not _same_origin(request):
+        return PlainTextResponse("Schreibzugriff nur von bulltraining selbst.", status_code=403)
     return await call_next(request)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.filters["pace"] = lambda v, unit="/km": fmt_pace(v, unit) or "–"
@@ -68,18 +88,19 @@ def render(request: Request, name: str, **ctx: Any) -> HTMLResponse:
     dupes = c.execute("SELECT count(*) AS n FROM activities WHERE possible_duplicate_of IS NOT NULL").fetchone()["n"]
     return templates.TemplateResponse(request, name, {
         "inbox_count": pending + dupes, "sport_color": SPORT_COLOR, "zone_names": ZONES, "zone_colors": ZONE_COLORS, "weekday_de": WEEKDAY_DE, "today": date.today(),
-        "flash": request.query_params.get("msg"), "error": request.query_params.get("err"), **ctx})
+        "flash": request.query_params.get("msg"), "error": request.query_params.get("err"), "root": ROOT_PATH.get(),
+        **ctx})
 
 
 def back(url: str, msg: str | None = None, err: str | None = None) -> RedirectResponse:
     from urllib.parse import urlencode
     params = {k: v for k, v in (("msg", msg), ("err", err)) if v}
-    return RedirectResponse(url + ("?" + urlencode(params) if params else ""), status_code=303)
+    return RedirectResponse(ROOT_PATH.get() + url + ("?" + urlencode(params) if params else ""), status_code=303)
 
 
 @app.get("/")
 def index() -> RedirectResponse:
-    return RedirectResponse("/calendar", status_code=303)
+    return back("/calendar")
 
 
 # --- Kalender --------------------------------------------------------------------
@@ -471,7 +492,8 @@ def plans_archive(plan_id: int) -> RedirectResponse:
 @app.get("/settings", response_class=HTMLResponse)
 def settings_view(request: Request) -> HTMLResponse:
     return render(request, "settings.html",
-                  settings={k: v for k, v in all_settings(conn()).items() if k != "publish_lock"})
+                  settings={k: v for k, v in all_settings(conn()).items() if k != "publish_lock"},
+                  mcp=config.MCP_INFO, host=request.headers.get("x-forwarded-host") or request.url.hostname)
 
 
 @app.post("/settings")
