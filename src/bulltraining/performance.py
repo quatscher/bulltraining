@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import date, timedelta
+from datetime import date as _date
 from typing import Any
 
 from .db import get_float, get_setting, now_iso, row_to_dict, set_setting, transaction
@@ -27,7 +28,7 @@ PROTOCOLS: dict[str, dict[str, Any]] = {
                    "Schwellenpuls Rad = 95 % des Durchschnittspulses.",
         "inputs": {"avg_power_20min_w": ("Ø Leistung 20 min in Watt", True),
                    "avg_hr_20min": ("Ø Puls 20 min", False), "max_hr": ("höchster Puls", False)},
-        "duration_min": 65, "load_if": 0.85,
+        "duration_min": 66, "load_if": 0.85,
         "description": ("Einfahren\n- 15m 55-65%\n\n3x\n- 1m 100%\n- 1m 55%\n\n- 5m 105%\n- 10m 50%\n\n"
                         "Test: 20 Minuten so hoch wie gleichmäßig haltbar\n- 20m 100%\n\nAusfahren\n- 10m 50%"),
     },
@@ -35,7 +36,7 @@ PROTOCOLS: dict[str, dict[str, Any]] = {
         "sport": "ride", "name": "Rampentest",
         "summary": "Stufen je 1 min, +20 W bis zum Abbruch. FTP = 75 % der besten 1-min-Leistung.",
         "inputs": {"best_1min_power_w": ("beste 1-min-Leistung in Watt", True), "max_hr": ("höchster Puls", False)},
-        "duration_min": 40, "load_if": 0.80,
+        "duration_min": 45, "load_if": 0.80,
         "description": "Einfahren\n- 10m 50%\n\nRampe bis zum Abbruch, jede Minute +20 W\n- 25m ramp 50-150%\n\nAusfahren\n- 10m 45%",
     },
     "run_30min_tt": {
@@ -43,7 +44,7 @@ PROTOCOLS: dict[str, dict[str, Any]] = {
         "summary": "30 min allein maximal. Schwellenpace = Ø Pace, Schwellenpuls = Ø Puls der letzten 20 min.",
         "inputs": {"distance_m": ("Strecke in 30 min, Meter", True),
                    "avg_hr_last_20min": ("Ø Puls letzte 20 min", False), "max_hr": ("höchster Puls", False)},
-        "duration_min": 60, "load_if": 0.85,
+        "duration_min": 59, "load_if": 0.85,
         "description": "Einlaufen\n- 15m Z1-Z2 HR\n4x\n- 20s 110% Pace\n- 40s Z1 HR\n\nTest: 30 Minuten maximal gleichmäßig\n- 30m 100% Pace\n\nAuslaufen\n- 10m Z1 HR",
     },
     "run_5k_tt": {
@@ -120,10 +121,13 @@ def evaluate(protocol: str, inputs: dict[str, Any]) -> dict[str, float]:
 
 
 def record_test(conn: sqlite3.Connection, *, date: str, protocol: str, inputs: dict[str, Any],
-                activity_id: int | None = None, notes: str | None = None) -> dict[str, Any]:
+                activity_id: int | None = None, notes: str | None = None,
+                today: _date | None = None) -> dict[str, Any]:
     """Test speichern und – wenn es der jüngste ist – die Schwellenwerte in `settings` übernehmen."""
     results = evaluate(protocol, inputs)
     sport = PROTOCOLS[protocol]["sport"]
+    if to_date(date) > (today or _date.today()):
+        raise TestError("Ein Testergebnis kann nicht in der Zukunft liegen. Geplante Tests stehen im Plan.")
     d = to_date(date).isoformat()
     before = {k: get_float(conn, k) for k in results}
     with transaction(conn):
@@ -161,6 +165,27 @@ def record_test(conn: sqlite3.Connection, *, date: str, protocol: str, inputs: d
             "hint": ("Schwellenwerte lokal übernommen. Beschreibungen geplanter Einheiten nutzen %-Angaben; "
                      "damit Uhr und intervals.icu dieselben Ziele zeigen, die Werte dort in den Sport-Einstellungen "
                      "angleichen.") if applied else None}
+
+
+def delete_test(conn: sqlite3.Connection, test_id: int, today: date | None = None) -> dict[str, Any]:
+    """Test löschen und die wirksamen Schwellen auf den jüngsten verbleibenden Test zurücksetzen – Anzeige, Zonen
+    und Workout-Ziele rechnen danach wieder mit demselben Wert."""
+    today = today or date.today()
+    row = conn.execute("SELECT * FROM performance_tests WHERE id = ?", (test_id,)).fetchone()
+    if row is None:
+        raise TestError(f"Test {test_id} existiert nicht.")
+    reset = {}
+    with transaction(conn):
+        conn.execute("DELETE FROM performance_tests WHERE id = ?", (test_id,))
+        for key in json.loads(row["results"]):
+            if key == "max_hr":
+                continue
+            prev = conn.execute("SELECT results FROM performance_tests WHERE results LIKE ? AND date <= ? "
+                                "ORDER BY date DESC, id DESC LIMIT 1", (f'%"{key}"%', today.isoformat())).fetchone()
+            value = json.loads(prev["results"])[key] if prev else None
+            set_setting(conn, key, value)
+            reset[key] = value
+    return reset
 
 
 def list_tests(conn: sqlite3.Connection, sport: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
@@ -206,8 +231,8 @@ def test_status(conn: sqlite3.Connection, sport: str, today: date | None = None)
     today = today or date.today()
     validity = int(get_float(conn, "test_validity_days", 56))
     lead = int(get_float(conn, "retest_lead_days", 14))
-    row = conn.execute("SELECT * FROM performance_tests WHERE sport = ? ORDER BY date DESC, id DESC LIMIT 1",
-                       (sport,)).fetchone()
+    row = conn.execute("SELECT * FROM performance_tests WHERE sport = ? AND date <= ? "
+                       "ORDER BY date DESC, id DESC LIMIT 1", (sport, today.isoformat())).fetchone()
     if row is None:
         return {"sport": sport, "status": "missing", "last_test": None, "age_days": None,
                 "valid_until": None, "protocol": DEFAULT_PROTOCOL.get(sport)}
@@ -228,16 +253,20 @@ def performance_state(conn: sqlite3.Connection, today: date | None = None,
         if sport not in sports:
             continue
         hist = [(r["date"], json.loads(r["results"])[key]) for r in conn.execute(
-            "SELECT date, results FROM performance_tests WHERE sport = ? AND results LIKE ? ORDER BY date, id",
-            (sport, f'%"{key}"%'))]
-        current = hist[-1][1] if hist else get_float(conn, key)
+            "SELECT date, results FROM performance_tests WHERE sport = ? AND results LIKE ? AND date <= ? "
+            "ORDER BY date, id", (sport, f'%"{key}"%', today.isoformat()))]
+        # Zum Stichtag wirksam ist der jüngste Test bis dahin. Die Einstellung (ggf. manuell übersteuert) ist
+        # unversioniert und gilt deshalb nur für die Gegenwart.
+        effective = get_float(conn, key) if today >= date.today() else None
+        current = effective if effective is not None else (hist[-1][1] if hist else None)
         prev = hist[-2][1] if len(hist) > 1 else None
         change = round(100 * (current - prev) / prev, 1) if prev and current else None
         improved = None if change is None else (change < 0 if lower_better else change > 0)
         metrics[key] = {"sport": sport, "label": label, "value": current, "display": _display(key, current),
                         "tested_on": hist[-1][0] if hist else None, "previous": prev,
                         "previous_display": _display(key, prev), "change_pct": change, "improved": improved,
-                        "history": [{"date": d, "value": v} for d, v in hist]}
+                        "history": [{"date": d, "value": v} for d, v in hist],
+                        "manual_override": bool(hist and current is not None and abs(current - hist[-1][1]) > 1e-6)}
     weight_row = conn.execute("SELECT weight_kg FROM wellness WHERE weight_kg IS NOT NULL ORDER BY date DESC LIMIT 1").fetchone()
     ftp = metrics.get("ftp_w", {}).get("value")
     tests = {s: test_status(conn, s, today) for s in sports}

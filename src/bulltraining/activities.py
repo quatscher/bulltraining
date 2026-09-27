@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 import sqlite3
 from typing import Any
 
@@ -78,10 +79,25 @@ def upsert_intervals_activity(conn: sqlite3.Connection, a: dict[str, Any]) -> st
     Von Hand getroffene Entscheidungen (is_endurance, excluded, rpe, notes) bleiben erhalten,
     sobald user_locked gesetzt ist – sonst würde der nächste Resync jede Dublettenauflösung zurückdrehen.
     """
+    existing = conn.execute("SELECT id, user_locked, rpe, raw FROM activities WHERE external_id = ? "
+                            "AND source = 'intervals'", (str(a["id"]),)).fetchone()
+    if existing is not None and existing["raw"]:
+        # Die Aktivitätsliste liefert nur eine Zusammenfassung; Detailfelder (Intervalle, Zonen) aus dem früheren
+        # Detailabruf bleiben erhalten, die Zusammenfassung aktualisiert den Rest.
+        try:
+            a = {**json.loads(existing["raw"]), **a}
+        except ValueError:
+            pass
     row = normalize_intervals_activity(a)
-    existing = conn.execute("SELECT id, user_locked, rpe FROM activities WHERE external_id = ? AND source = 'intervals'",
-                            (row["external_id"],)).fetchone()
     ts = now_iso()
+    if existing is not None:
+        # Last aus dem wirksamen Zustand bestimmen: von Hand eingetragene RPE trägt die Last, wenn keine Messung da ist
+        rpe_eff = existing["rpe"] if existing["user_locked"] else (row["rpe"] if row["rpe"] is not None else existing["rpe"])
+        # Keine Messlast (oder nur eine aus der Quell-RPE abgeleitete): Last aus der wirksamen RPE. Echte
+        # Messlast (Leistung/Puls) bleibt unberührt.
+        if row["load_method"] in (None, "srpe") and rpe_eff is not None:
+            row["rpe"] = rpe_eff
+            row["load"], row["load_method"] = srpe_load(rpe_eff, row["duration_s"]), "srpe"
     if existing is None:
         cols = list(row) + ["created_at", "updated_at"]
         conn.execute(f"INSERT INTO activities ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})",
@@ -162,6 +178,20 @@ def update_activity(conn: sqlite3.Connection, activity_id: int, **fields: Any) -
         raise ActivityError("RPE muss zwischen 1 und 10 liegen.")
     if "sport" in fields and fields["sport"] not in SPORTS:
         raise ActivityError(f"Unbekannte Sportart '{fields['sport']}'.")
+    if "duration_s" in fields:
+        fields["duration_s"] = int(fields["duration_s"])
+        if not 60 <= fields["duration_s"] <= 24 * 3600:
+            raise ActivityError("Dauer muss zwischen 1 Minute und 24 Stunden liegen.")
+    if "start_date" in fields:
+        try:
+            start = datetime.fromisoformat(str(fields["start_date"]).strip())
+        except ValueError:
+            raise ActivityError(f"Startzeit '{fields['start_date']}' ist ungültig (YYYY-MM-DDTHH:MM).")
+        fields["start_date"] = start.replace(microsecond=0).isoformat()[:19]
+    if "hr_avg" in fields and not 30 <= int(fields["hr_avg"]) <= 250:
+        raise ActivityError("Puls muss zwischen 30 und 250 liegen.")
+    if "distance_m" in fields and float(fields["distance_m"]) < 0:
+        raise ActivityError("Distanz darf nicht negativ sein.")
     merged = {**dict(act), **fields}
     if merged["load_method"] == "srpe" or (act["load"] is None and merged.get("rpe")):
         fields["load"] = srpe_load(merged["rpe"], merged["duration_s"])

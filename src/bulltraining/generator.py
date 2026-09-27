@@ -47,11 +47,15 @@ def availability(plan: dict[str, Any]) -> dict[str, dict[str, int | None]]:
     for s in sports:
         entry = raw.get(s)
         if entry is None:
-            out[s] = {d: None for d in WEEKDAYS if d != "mon"}
+            out[s] = {d: None for d in WEEKDAYS}  # ohne Angabe jeder Tag; der Ruhetag wird separat gewählt
         elif isinstance(entry, dict):
             out[s] = {d: (int(v) if v else None) for d, v in entry.items()}
         else:
             out[s] = {d: None for d in entry}
+    rec = plan.get("recurring")
+    for r in (json.loads(rec) if isinstance(rec, str) and rec else (rec or [])):
+        if r.get("sport") in out and r.get("day") in WEEKDAYS:
+            out[r["sport"]].setdefault(r["day"], None)  # feste Einheiten sind per Definition verfügbar
     return out
 
 
@@ -66,12 +70,15 @@ class _Week:
         for s in fixed:
             self.slots[to_date(s["date"])].append(s)
         self.rest_day: date | None = None
+        self.outside_hard: set[date] = set()  # harte Tage direkt vor/nach der Woche (Sonntag davor, Montag danach)
 
     def is_hard(self, d: date) -> bool:
+        if d in self.outside_hard:
+            return True
         return any(s.get("intensity") in workouts.HARD for s in self.slots.get(d, []))
 
     def hard_count(self) -> int:
-        return sum(1 for d in self.days if self.is_hard(d))
+        return sum(1 for d in self.days if any(s.get("intensity") in workouts.HARD for s in self.slots[d]))
 
     def minutes(self, d: date) -> float:
         return sum(s["duration_s"] for s in self.slots[d]) / 60
@@ -108,7 +115,8 @@ def _place(week: _Week, req: dict[str, Any], avail: dict[str, dict[str, int | No
         if any(s["sport"] == sport for s in week.slots[d]) or len(week.slots[d]) >= 2:
             continue
         cap = sport_days[key]
-        if cap is not None and cap < req["duration_s"] / 60 * 0.7:
+        indivisible = req["intensity"] in ("test", "race")  # Tests/Rennen lassen sich nicht kürzen
+        if cap is not None and cap < req["duration_s"] / 60 * (1.0 if indivisible else 0.7):
             continue
         if hard and (week.is_hard(d) or week.neighbours_hard(d) or week.hard_count() >= week.max_hard):
             continue
@@ -174,6 +182,9 @@ def generate_week(conn: sqlite3.Connection, plan: dict[str, Any], monday: date,
     fixed = [s for s in state if monday <= to_date(s["date"]) <= sunday and s.get("status") != "deleted"
              and (to_date(s["date"]) < today or s.get("status") in ("done", "skipped") or s.get("category") == "RACE")]
     week = _Week(monday, fixed, today, int(get_float(conn, "max_hard_days", 3)))
+    week.outside_hard = {to_date(s["date"]) for s in state if s.get("status") not in ("deleted",)
+                         and s.get("intensity") in workouts.HARD
+                         and to_date(s["date"]) in (monday - timedelta(days=1), sunday + timedelta(days=1))}
     avail = availability(plan)
     baseline = training_baseline(conn, as_of=min(monday, today))
     recurring = _recurring_sessions(conn, plan, monday, today, fixed)

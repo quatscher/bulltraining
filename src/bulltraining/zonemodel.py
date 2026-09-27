@@ -7,97 +7,28 @@ Absolviert: Zonenzeiten aus intervals.icu (Leistung beim Rad, sonst Puls), 7 Zon
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 from typing import Any
 
+from . import workout_syntax as syntax
 from .db import get_float
 
 ZONES = ["Z1 Regeneration", "Z2 Grundlage", "Z3 Tempo", "Z4 Schwelle", "Z5 VO2max+"]
 ZONE_COLORS = ["#9fb7c9", "#4fa36b", "#e0b43a", "#e0703a", "#c8363a"]
 
-# Obergrenzen in % der Schwelle (Rad: % FTP; Lauf/Schwimmen: % Schwellengeschwindigkeit) für Z1..Z4
-_UPPER = {
-    "ride": (55, 75, 90, 105),
-    "run": (78, 88, 95, 102),
-    "swim": (80, 90, 97, 102),
-}
-_DEFAULT_PACE = {"run": 330.0, "swim": 120.0}  # s/km bzw. s/100 m, falls kein Test vorliegt
-
-_STEP = re.compile(r"^-\s*(?P<dur>(?:\d+(?:\.\d+)?(?:h|m|s))+|\d+(?:\.\d+)?(?:mtr|km))\b\s*(?P<target>.*)$", re.I)
-_REPEAT = re.compile(r"^(\d+)\s*x\s*$", re.I)
-_PCT = re.compile(r"(\d+(?:\.\d+)?)(?:\s*-\s*(\d+(?:\.\d+)?))?\s*%")
-_HRZ = re.compile(r"Z(\d)(?:\s*-\s*Z(\d))?", re.I)
-
-
 def zone_for_pct(sport: str, pct: float) -> int:
-    for i, upper in enumerate(_UPPER.get(sport, _UPPER["ride"])):
-        if pct <= upper:
-            return i
-    return 4
+    return syntax.zone_for_pct(sport, pct)
 
 
-def _target_zone(sport: str, target: str) -> tuple[int, float]:
-    """Zone (0..4) und Anteil der Schwellengeschwindigkeit (für Distanzschritte)."""
-    t = target.strip().lower()
-    if not t or t.startswith("rest"):
-        return 0, 0.65
-    if "max" in t.split():
-        return 4, 1.05
-    m = _PCT.search(t)
-    if m:
-        lo = float(m.group(1))
-        hi = float(m.group(2) or m.group(1))
-        if "ramp" in t:  # Rampe: mittlere Intensität, Schwerpunkt oben
-            mid = lo + (hi - lo) * 0.6
-        else:
-            mid = (lo + hi) / 2
-        return zone_for_pct(sport, mid), mid / 100
-    m = _HRZ.search(t)
-    if m:
-        z = (int(m.group(1)) + int(m.group(2) or m.group(1))) / 2
-        z = int(z)  # Z1-Z2 -> Z1, Z2 -> Z2 usw.
-        return max(0, min(4, z - 1)), {0: 0.72, 1: 0.83, 2: 0.9, 3: 0.98, 4: 1.05}[max(0, min(4, z - 1))]
-    return 1, 0.83  # ohne Vorgabe: Grundlage
-
-
-def _duration_s(dur: str, sport: str, speed_frac: float, pace: float | None) -> float:
-    dur = dur.lower()
-    if dur.endswith("mtr") or dur.endswith("km"):
-        meters = float(dur[:-3]) if dur.endswith("mtr") else float(dur[:-2]) * 1000
-        base = pace or _DEFAULT_PACE.get(sport, 330.0)
-        per_m = base / (100 if sport == "swim" else 1000)
-        return meters * per_m / max(speed_frac, 0.3)
-    total = 0.0
-    for num, unit in re.findall(r"(\d+(?:\.\d+)?)(h|m|s)", dur):
-        total += float(num) * {"h": 3600, "m": 60, "s": 1}[unit]
-    return total
-
-
-def description_zone_secs(description: str | None, sport: str, pace: float | None = None) -> list[float] | None:
-    """Sekunden je Zone aus einer Intervals-Beschreibung. None, wenn kein Schritt erkannt wurde."""
+def description_zone_secs(description: str | None, sport: str, pace: float | None = None,
+                          ftp: float | None = None) -> list[float] | None:
+    """Sekunden je Zone aus einer Intervals-Beschreibung (tolerant, für Anzeige). None, wenn kein Schritt erkannt."""
     if not description:
         return None
-    secs = [0.0] * 5
-    found = False
-    repeat = 1
-    for raw in description.splitlines():
-        line = raw.strip()
-        if not line:
-            repeat = 1  # Wiederholungsblock endet an einer Leerzeile
-            continue
-        rep = _REPEAT.match(line)
-        if rep:
-            repeat = int(rep.group(1))
-            continue
-        step = _STEP.match(line)
-        if not step:
-            repeat = 1  # Textzeile beendet ebenfalls einen Block
-            continue
-        zone, frac = _target_zone(sport, step.group("target"))
-        secs[zone] += _duration_s(step.group("dur"), sport, frac, pace) * repeat
-        found = True
-    return [round(s) for s in secs] if found else None
+    items = syntax.parse(description, sport, ftp=ftp, pace=pace)
+    if not any(it["type"] == "step" or (it["type"] == "repeat" and it["steps"]) for it in items):
+        return None
+    return [round(v) for v in syntax.zone_seconds(items)]
 
 
 def session_zone_secs(session: dict[str, Any], paces: dict[str, float | None]) -> list[float]:

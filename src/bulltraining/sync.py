@@ -35,6 +35,23 @@ def _upsert_wellness(conn: sqlite3.Connection, w: dict[str, Any]) -> None:
     )
 
 
+def _remove_deleted(conn: sqlite3.Connection, listed: set[str], oldest: str, newest: str) -> int:
+    """Gespiegelte Aktivitäten im abgerufenen Zeitraum, die es an der Quelle nicht mehr gibt, entfernen.
+
+    Nur nach vollständigem, erfolgreichem Abruf (sonst hätte run_sync vorher abgebrochen). Lokale Zeilen bleiben
+    unberührt. Schutz gegen eine leere Antwort durch einen API-Fehler: dann nichts löschen.
+    """
+    rows = conn.execute("SELECT id, external_id FROM activities WHERE source = 'intervals' "
+                        "AND start_date >= ? AND start_date < ?",
+                        (oldest, (date.fromisoformat(newest) + timedelta(days=1)).isoformat())).fetchall()
+    gone = [r["id"] for r in rows if r["external_id"] not in listed]
+    if not listed and len(gone) >= 3:
+        return 0
+    for aid in gone:
+        conn.execute("DELETE FROM activities WHERE id = ?", (aid,))
+    return len(gone)
+
+
 def run_sync(conn: sqlite3.Connection, client: IntervalsClient, full: bool = False,
              today: date | None = None) -> dict[str, Any]:
     today = today or date.today()
@@ -63,6 +80,7 @@ def run_sync(conn: sqlite3.Connection, client: IntervalsClient, full: bool = Fal
             for w in wellness:
                 if w.get("id"):
                     _upsert_wellness(conn, w)
+            removed = _remove_deleted(conn, {str(a["id"]) for a in listing if a.get("id")}, oldest, newest)
             n_dupes = duplicates.mark_candidates(conn)
         from .publisher import reconcile  # spät importiert, vermeidet Zyklus
         reconciled = reconcile(conn, today=today)
@@ -72,5 +90,6 @@ def run_sync(conn: sqlite3.Connection, client: IntervalsClient, full: bool = Fal
     conn.execute("UPDATE sync_runs SET finished_at = ?, n_created = ?, n_updated = ? WHERE id = ?",
                  (now_iso(), created, updated, run_id))
     return {"run_id": run_id, "from_date": from_date.isoformat(), "created": created, "updated": updated,
+            "removed": removed,
             "wellness_days": len(wellness), "duplicate_candidates": n_dupes, "reconciled": reconciled,
             "rate_limit_remaining": client.rate_remaining}

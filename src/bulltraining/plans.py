@@ -75,7 +75,8 @@ def create_plan(conn: sqlite3.Connection, *, name: str, goal_type: str, sports: 
                 "tests": {s: test_status(conn, s, today) for s in sports if s in ENDURANCE_SPORTS},
                 "thresholds": {k: get_float(conn, k) for k in ("ftp_w", "threshold_pace_run_s_per_km", "css_s_per_100m", "lthr_run")}}
     with transaction(conn):
-        conn.execute("UPDATE plans SET status = 'archived' WHERE status = 'active'")
+        for old in conn.execute("SELECT id FROM plans WHERE status = 'active'").fetchall():
+            archive_plan(conn, old["id"], today)
         cur = conn.execute(
             "INSERT INTO plans(name, goal_type, goal_date, goal_kind, sports, focus, priority, weekly_hours, "
             "available_days, recurring, start_date, baseline, status, created_at) "
@@ -85,12 +86,30 @@ def create_plan(conn: sqlite3.Connection, *, name: str, goal_type: str, sports: 
              json.dumps(available_days) if available_days else None,
              json.dumps(recurring, ensure_ascii=False) if recurring else None, start.isoformat(),
              json.dumps(snapshot), now_iso()))
-    plan = get_plan_by_id(conn, cur.lastrowid)
-    return {"plan": plan, "readiness": plan_readiness(conn, plan, today)}
+        plan = get_plan_by_id(conn, cur.lastrowid)
+        # innerhalb der Transaktion: scheitert die Auswertung, bleibt der alte Plan aktiv
+        readiness = plan_readiness(conn, plan, today)
+    return {"plan": plan, "readiness": readiness}
 
 
-def archive_plan(conn: sqlite3.Connection, plan_id: int) -> None:
-    conn.execute("UPDATE plans SET status = 'archived' WHERE id = ?", (plan_id,))
+def archive_plan(conn: sqlite3.Connection, plan_id: int, today: date | None = None) -> dict[str, int]:
+    """Plan archivieren: Vergangenes bleibt als Historie, künftige Einheiten werden abgesagt – veröffentlichte
+    gehen auf 'deleted' (der Publisher entfernt sie aus intervals.icu), unveröffentlichte entfallen direkt.
+    Offene Vorschläge des Plans werden verworfen."""
+    today = today or date.today()
+    with transaction(conn):
+        conn.execute("UPDATE plans SET status = 'archived' WHERE id = ?", (plan_id,))
+        cancelled = conn.execute(
+            "UPDATE plan_sessions SET status = 'deleted', revision = revision + 1, updated_at = ? "
+            "WHERE plan_id = ? AND date >= ? "
+            "AND status IN ('planned', 'published') AND external_event_id IS NOT NULL",
+            (now_iso(), plan_id, today.isoformat())).rowcount
+        dropped = conn.execute(
+            "DELETE FROM plan_sessions WHERE plan_id = ? AND date >= ? AND status = 'planned' "
+            "AND external_event_id IS NULL", (plan_id, today.isoformat())).rowcount
+        conn.execute("UPDATE plan_changes SET status = 'rejected', resolved_at = ? WHERE plan_id = ? "
+                     "AND status = 'pending'", (now_iso(), plan_id))
+    return {"cancelled_published": cancelled, "dropped": dropped}
 
 
 def plan_readiness(conn: sqlite3.Connection, plan: dict[str, Any], today: date | None = None) -> dict[str, Any]:
@@ -114,7 +133,10 @@ def plan_readiness(conn: sqlite3.Connection, plan: dict[str, Any], today: date |
     target = float(plan.get("weekly_hours") or 0)
     inc = get_float(conn, "max_weekly_load_increase_pct", 10) / 100
     ramp_weeks = None
-    if current > 0 and target > current:
+    if current > 0 and target > current and inc <= 0:
+        notes.append(f"Aktuell {current:.1f} h/Woche, Ziel {target:g} h – mit 0 % Wochensteigerung wird der "
+                     "Zielumfang nicht erreicht (Einstellung max_weekly_load_increase_pct).")
+    elif current > 0 and target > current:
         # 3 Aufbauwochen je Block, Entlastung zählt nicht zum Aufbau
         load_weeks = math.ceil(math.log(target / current) / math.log(1 + inc))
         ramp_weeks = load_weeks + load_weeks // 3
@@ -334,8 +356,8 @@ def _apply_op(sim: _Sim, op: dict[str, Any]) -> None:
                                        c.get("protocol") or (DEFAULT_PROTOCOL.get(sport) if intensity == "test" else None))
                 if c.get("title"):
                     built["title"] = c["title"]
-                if c.get("description"):
-                    built["description"] = c["description"]
+                if c.get("description") and intensity != "test":
+                    built.update(_from_description(sim, i, sport, c))
                 sim.add(tool_name, {"date": d.isoformat(), "sport": sport, **built})
         else:
             gen = generator.generate_week(sim.conn, sim.plan, monday, sim.active_list(), sim.today)
@@ -343,6 +365,29 @@ def _apply_op(sim: _Sim, op: dict[str, Any]) -> None:
                 sim.add(tool_name, s)
             sim.warnings += gen["warnings"]
         sim.mondays.add(monday)
+
+
+def _from_description(sim: _Sim, i: int, sport: str, c: dict[str, Any]) -> dict[str, Any]:
+    """Eigene Workout-Beschreibung: sie geht so auf die Uhr, also bestimmen ihre Schritte Dauer, Last und Intensität.
+    Sonst könnte "30 min locker" gemeldet und "180 min hart" exportiert werden."""
+    desc = str(c["description"])
+    if sport not in ENDURANCE_SPORTS:
+        return {"description": desc}
+    try:
+        derived = workouts.from_description(sim.conn, sport, desc)
+    except ValueError as exc:  # WorkoutSyntaxError
+        raise PlanError(f"sessions[{i}].description: {exc}")
+    if derived is None:
+        raise PlanError(f"sessions[{i}].description: keine auswertbaren Schritte (Intervals-Syntax, z. B. '- 10m 70%').")
+    stated = c.get("duration_min")
+    minutes = derived["duration_s"] / 60
+    if stated and abs(minutes - float(stated)) > max(5.0, 0.1 * float(stated)):
+        raise PlanError(f"sessions[{i}]: Beschreibung ergibt {minutes:.0f} min, angegeben sind {float(stated):.0f} min.")
+    order = workouts.INTENSITY_ORDER
+    claimed = c.get("intensity", "easy")
+    if order.index(derived["intensity"]) > order.index(claimed if claimed in order else "easy"):
+        sim.warnings.append(f"sessions[{i}]: Beschreibung ist härter als '{claimed}' – als {derived['intensity']} gewertet.")
+    return {"description": desc, **derived}
 
 
 def _diff(sim: _Sim) -> dict[str, list[dict[str, Any]]]:
@@ -437,13 +482,14 @@ def _write_session(conn: sqlite3.Connection, target: dict[str, Any], current: di
         if current is None:
             return target["id"]
         if current.get("external_event_id"):
-            conn.execute("UPDATE plan_sessions SET status = 'deleted', updated_at = ? WHERE id = ?", (ts, current["id"]))
+            conn.execute("UPDATE plan_sessions SET status = 'deleted', revision = revision + 1, updated_at = ? "
+                         "WHERE id = ?", (ts, current["id"]))
         else:
             conn.execute("DELETE FROM plan_sessions WHERE id = ?", (current["id"],))
         return current["id"]
     if current is None:
-        ext = target.get("external_event_id")
-        values = {**fields, "status": "planned", "external_event_id": ext, "created_at": ts, "updated_at": ts}
+        # Zeile fehlt -> ggf. auch das externe Event (Publisher löscht erst extern, dann lokal). Neu anlegen lassen.
+        values = {**fields, "status": "planned", "external_event_id": None, "created_at": ts, "updated_at": ts}
         if target.get("id") and target["id"] > 0:
             values["id"] = target["id"]  # Wiederherstellen einer gelöschten Einheit mit alter id
         cols = list(values)
@@ -453,8 +499,8 @@ def _write_session(conn: sqlite3.Connection, target: dict[str, Any], current: di
     # Bereits veröffentlicht: zurück auf 'planned', external_event_id bleibt -> Publisher aktualisiert per PUT
     status = "planned" if current["status"] in ("published", "planned", "deleted") else current["status"]
     assignments = ", ".join(f"{k} = ?" for k in fields)
-    conn.execute(f"UPDATE plan_sessions SET {assignments}, status = ?, updated_at = ? WHERE id = ?",
-                 [*fields.values(), status, ts, current["id"]])
+    conn.execute(f"UPDATE plan_sessions SET {assignments}, status = ?, revision = revision + 1, updated_at = ? "
+                 "WHERE id = ?", [*fields.values(), status, ts, current["id"]])
     return current["id"]
 
 
@@ -468,67 +514,132 @@ def get_change(conn: sqlite3.Connection, change_id: int) -> dict[str, Any] | Non
                        ("ops", "diff", "warnings"))
 
 
+_COMPARE = tuple(k for k in SESSION_FIELDS if k not in ("status", "external_event_id"))
+
+
+def _differs(cur: dict[str, Any], snap: dict[str, Any]) -> bool:
+    return any(cur.get(k) != snap.get(k) for k in _COMPARE)
+
+
+def _state_with(conn: sqlite3.Connection, plan_id: int, targets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Aktueller Plan mit hypothetisch angewendeten Zielzuständen – Grundlage für die erneute Regelprüfung."""
+    state = {s["id"]: _snap(s) for s in get_sessions(conn, plan_id)}
+    for t in targets:
+        if t.get("_deleted"):
+            state.pop(t["id"], None)
+        else:
+            state[t["id"]] = {**{k: t.get(k) for k in SESSION_FIELDS}, "status": t.get("status") or "planned"}
+    return list(state.values())
+
+
+def _later_change_touching(conn: sqlite3.Connection, change_id: int, session_id: int) -> int | None:
+    for r in conn.execute("SELECT id, diff FROM plan_changes WHERE id > ? AND status = 'applied' ORDER BY id",
+                          (change_id,)):
+        diff = json.loads(r["diff"])
+        if any(x.get("id") == session_id for x in diff.get("before", []) + diff.get("after", [])):
+            return r["id"]
+    return None
+
+
+def _check_rules(conn: sqlite3.Connection, plan: dict[str, Any], state: list[dict[str, Any]],
+                 touched: list[dict[str, Any]], today: date, what: str) -> None:
+    mondays = {monday_of(x["date"]) for x in touched if x.get("date")}
+    errors, _ = rules.validate_weeks(conn, plan, state, mondays, today)
+    if errors:
+        raise PlanError(f"{what} verletzt inzwischen Planregeln", errors)
+
+
 def apply_change(conn: sqlite3.Connection, change_id: int, today: date | None = None) -> dict[str, Any]:
+    """Bestätigt einen Vorschlag. Alles in einer Schreibtransaktion: Planstand prüfen, Regeln auf dem tatsächlichen
+    Ergebnis erneut auswerten (andere Vorschläge können inzwischen angewendet sein), dann schreiben."""
     today = today or date.today()
-    ch = get_change(conn, change_id)
-    if ch is None or ch["status"] != "pending":
-        raise PlanError(f"Änderung {change_id} ist nicht offen.")
-    diff = ch["diff"]
-    stale = []
-    for b in diff["before"]:
-        cur = _current(conn, b["id"])
-        if cur is None or any(cur.get(k) != b.get(k) for k in SESSION_FIELDS if k not in ("status", "external_event_id")):
-            stale.append(b["id"])
-        if to_date(b["date"]) < today:
-            stale.append(b["id"])
-    if any(to_date(a["date"]) < today for a in diff["after"] if not a.get("_deleted")):
-        stale.append("Datum")
-    if stale:
-        raise PlanError("Plan hat sich seit dem Vorschlag geändert oder betroffene Tage liegen jetzt in der "
-                        "Vergangenheit. Vorschlag verwerfen und neu erstellen.")
     with transaction(conn):
+        ch = get_change(conn, change_id)
+        if ch is None or ch["status"] != "pending":
+            raise PlanError(f"Änderung {change_id} ist nicht offen.")
+        plan = get_plan_by_id(conn, ch["plan_id"]) if ch.get("plan_id") else None
+        if plan is None or plan["status"] != "active":
+            raise PlanError("Der Plan dieses Vorschlags ist nicht mehr aktiv. Vorschlag verwerfen.")
+        diff = ch["diff"]
+        conflicts = []
+        for b in diff["before"]:
+            cur = _current(conn, b["id"])
+            if cur is None or cur["status"] not in CHANGEABLE or _differs(cur, b):
+                conflicts.append(f"Einheit {b['id']} ({b['title']}) wurde seit dem Vorschlag geändert oder erledigt.")
+            elif to_date(b["date"]) < today:
+                conflicts.append(f"{b['title']} am {b['date']} liegt inzwischen in der Vergangenheit.")
+        for a in diff["after"]:
+            if not a.get("_deleted") and to_date(a["date"]) < today:
+                conflicts.append(f"{a['title']} am {a['date']} liegt inzwischen in der Vergangenheit.")
+        if conflicts:
+            raise PlanError("Vorschlag passt nicht mehr zum Plan – verwerfen und neu erstellen", sorted(set(conflicts)))
+        _check_rules(conn, plan, _state_with(conn, plan["id"], diff["after"]), diff["before"] + diff["after"],
+                     today, "Vorschlag")
         for a in diff["after"]:
             cur = _current(conn, a["id"]) if a["id"] > 0 else None
-            new_id = _write_session(conn, a, cur)
-            a["id"] = new_id  # temporäre ids durch echte ersetzen, damit Undo sie findet
+            a["id"] = _write_session(conn, a, cur)  # temporäre ids durch echte ersetzen, damit Undo sie findet
         conn.execute("UPDATE plan_changes SET status = 'applied', applied_at = ?, resolved_at = ?, diff = ? WHERE id = ?",
                      (now_iso(), now_iso(), json.dumps(diff, ensure_ascii=False), change_id))
     return get_change(conn, change_id)
 
 
 def reject_change(conn: sqlite3.Connection, change_id: int) -> None:
-    ch = get_change(conn, change_id)
-    if ch is None or ch["status"] != "pending":
-        raise PlanError(f"Änderung {change_id} ist nicht offen.")
-    conn.execute("UPDATE plan_changes SET status = 'rejected', resolved_at = ? WHERE id = ?", (now_iso(), change_id))
+    with transaction(conn):
+        ch = get_change(conn, change_id)
+        if ch is None or ch["status"] != "pending":
+            raise PlanError(f"Änderung {change_id} ist nicht offen.")
+        conn.execute("UPDATE plan_changes SET status = 'rejected', resolved_at = ? WHERE id = ?", (now_iso(), change_id))
 
 
 def revert_change(conn: sqlite3.Connection, change_id: int, today: date | None = None) -> dict[str, Any]:
-    """Macht eine angewendete Änderung rückgängig – als eigene, protokollierte Änderung."""
+    """Macht eine angewendete Änderung rückgängig – als eigene, protokollierte Änderung.
+
+    Nur wenn die betroffenen Einheiten noch genau dem Ergebnis dieser Änderung entsprechen. Wurden sie danach
+    erneut geändert, würde ein Undo die spätere Änderung stillschweigend überschreiben; dann erst diese zurücknehmen.
+    """
     today = today or date.today()
-    ch = get_change(conn, change_id)
-    if ch is None or ch["status"] != "applied":
-        raise PlanError(f"Änderung {change_id} ist nicht angewendet.")
-    diff = ch["diff"]
-    before_ids = {b["id"] for b in diff["before"]}
-    for s in diff["before"] + [a for a in diff["after"] if not a.get("_deleted")]:
-        cur = _current(conn, s["id"])
-        if to_date(s["date"]) < today or (cur and cur["status"] in ("done", "skipped")):
-            raise PlanError(f"Einheit {s['id']} liegt in der Vergangenheit oder ist erledigt – Undo nicht möglich.")
-    new_before, new_after = [], []
     with transaction(conn):
+        ch = get_change(conn, change_id)
+        if ch is None or ch["status"] != "applied":
+            raise PlanError(f"Änderung {change_id} ist nicht angewendet.")
+        plan = get_plan_by_id(conn, ch["plan_id"]) if ch.get("plan_id") else None
+        if plan is None or plan["status"] != "active":
+            raise PlanError("Der Plan dieser Änderung ist nicht mehr aktiv.")
+        diff = ch["diff"]
+        before_ids = {b["id"] for b in diff["before"]}
+        conflicts = []
         for a in diff["after"]:
             cur = _current(conn, a["id"])
-            if a["id"] not in before_ids and cur is not None:  # von der Änderung angelegt -> entfernen
+            later = None
+            if a.get("_deleted"):
+                if cur is not None and cur["status"] != "deleted":
+                    later = _later_change_touching(conn, change_id, a["id"])
+                    if cur.get("created_at") and ch.get("applied_at") and cur["created_at"] > ch["applied_at"]:
+                        conflicts.append(f"Die ID {a['id']} gehört inzwischen einer anderen Einheit ({cur['title']}) – "
+                                         "sie wurde vor der Schema-Migration neu vergeben; Undo nicht möglich.")
+                    else:
+                        conflicts.append(f"Einheit {a['id']} existiert wieder" + (f" (Änderung #{later})" if later else ""))
+            elif cur is None or cur["status"] not in CHANGEABLE or _differs(cur, a):
+                later = _later_change_touching(conn, change_id, a["id"])
+                what = "erledigt/übersprungen" if cur and cur["status"] in ("done", "skipped") else "danach erneut geändert"
+                conflicts.append(f"{a['title']} am {a['date']} wurde {what}" + (f" (Änderung #{later})" if later else ""))
+        for s in diff["before"] + [a for a in diff["after"] if not a.get("_deleted")]:
+            if to_date(s["date"]) < today:
+                conflicts.append(f"{s['title']} am {s['date']} liegt in der Vergangenheit.")
+        if conflicts:
+            raise PlanError("Undo nicht möglich – zuerst spätere Änderungen zurücknehmen", sorted(set(conflicts)))
+        inverse = [{**_snap(_current(conn, a["id"])), "_deleted": True}
+                   for a in diff["after"] if a["id"] not in before_ids and not a.get("_deleted")
+                   and _current(conn, a["id"]) is not None]
+        inverse += [{**b, "_deleted": False} for b in diff["before"]]
+        _check_rules(conn, plan, _state_with(conn, plan["id"], inverse), inverse, today, "Undo")
+        new_before, new_after = [], []
+        for t in inverse:
+            cur = _current(conn, t["id"])
+            if cur is not None and cur["status"] != "deleted":
                 new_before.append(_snap(cur))
-                new_after.append({**_snap(cur), "_deleted": True})
-                _write_session(conn, {**_snap(cur), "_deleted": True}, cur)
-        for b in diff["before"]:
-            cur = _current(conn, b["id"])
-            if cur:
-                new_before.append(_snap(cur))
-            _write_session(conn, {**b, "_deleted": False}, cur)
-            new_after.append(b)
+            _write_session(conn, t, cur)
+            new_after.append(t)
         conn.execute("UPDATE plan_changes SET status = 'reverted', resolved_at = ? WHERE id = ?", (now_iso(), change_id))
         cur = conn.execute(
             "INSERT INTO plan_changes(plan_id, created_at, actor, tool, reason, ops, diff, warnings, status, applied_at, "

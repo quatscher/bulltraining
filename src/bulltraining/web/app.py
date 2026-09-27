@@ -7,12 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 
 from .. import activities, duplicates, metrics, performance, plans
-from ..db import all_settings, connect, set_setting
+from ..db import SettingError, all_settings, set_setting, thread_connection, transaction, validate_setting
 from ..intervals_client import IntervalsClient, IntervalsError
 from ..periodization import available_templates, week_context, week_targets, weekly_series
 from ..util import SPORTS, WEEKDAYS, fmt_pace, iso_week, monday_of, parse_week, week_days
@@ -20,6 +20,20 @@ from ..zonemodel import ZONE_COLORS, ZONES, activity_zone_secs, reference_paces,
 from ..workout_view import Thresholds, workout_steps
 
 app = FastAPI(title="bulltraining")
+
+
+@app.middleware("http")
+async def same_origin_writes(request: Request, call_next: Any) -> Any:
+    """Schreibende Anfragen nur von dieser Seite selbst. Ohne diese Prüfung könnte eine fremde Website im selben
+    Browser per Formular-POST Einstellungen ändern oder Vorschläge bestätigen."""
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        from urllib.parse import urlparse
+        if request.headers.get("sec-fetch-site") == "cross-site":
+            return PlainTextResponse("Schreibzugriff nur von bulltraining selbst.", status_code=403)
+        origin = request.headers.get("origin") or request.headers.get("referer")
+        if origin and urlparse(origin).netloc != request.headers.get("host"):
+            return PlainTextResponse("Schreibzugriff nur von bulltraining selbst.", status_code=403)
+    return await call_next(request)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.filters["pace"] = lambda v, unit="/km": fmt_pace(v, unit) or "–"
 templates.env.filters["minutes"] = lambda s: f"{int(s or 0) // 60} min"
@@ -43,10 +57,9 @@ WEEKDAY_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 
 def conn():
-    global _conn
-    if _conn is None:
-        _conn = connect()
-    return _conn
+    """Verbindung je Thread (parallele Anfragen dürfen sich keine Transaktion teilen).
+    `_conn` kann in Tests auf eine feste Verbindung gesetzt werden."""
+    return _conn if _conn is not None else thread_connection()
 
 
 def render(request: Request, name: str, **ctx: Any) -> HTMLResponse:
@@ -195,8 +208,12 @@ async def performance_test(request: Request) -> RedirectResponse:
 
 @app.post("/performance/test/{test_id}/delete")
 def performance_test_delete(test_id: int) -> RedirectResponse:
-    conn().execute("DELETE FROM performance_tests WHERE id = ?", (test_id,))
-    return back("/performance", msg=f"Test {test_id} gelöscht. Schwellenwerte bleiben bis zum nächsten Test bestehen.")
+    try:
+        reset = performance.delete_test(conn(), test_id)
+    except performance.TestError as exc:
+        return back("/performance", err=str(exc))
+    parts = [f"{k} → {v if v is not None else 'leer'}" for k, v in reset.items()]
+    return back("/performance", msg=f"Test {test_id} gelöscht. Schwellen aus dem vorherigen Test: " + ", ".join(parts))
 
 
 # --- Posteingang ------------------------------------------------------------------
@@ -205,8 +222,8 @@ def performance_test_delete(test_id: int) -> RedirectResponse:
 def inbox(request: Request) -> HTMLResponse:
     c = conn()
     runs = [dict(r) for r in c.execute("SELECT * FROM sync_runs ORDER BY id DESC LIMIT 5")]
-    errors = [dict(r) for r in c.execute("SELECT id, date, title, publish_error FROM plan_sessions "
-                                         "WHERE publish_error IS NOT NULL AND status = 'planned'")]
+    errors = [dict(r) for r in c.execute("SELECT id, date, title, publish_error, publish_unknown FROM plan_sessions "
+                                         "WHERE (publish_error IS NOT NULL OR publish_unknown = 1) AND status = 'planned'")]
     unpublished = c.execute("SELECT count(*) AS n FROM plan_sessions ps JOIN plans p ON p.id = ps.plan_id AND p.status='active' "
                             "WHERE ps.status IN ('planned','deleted') AND ps.date >= ?", (date.today().isoformat(),)).fetchone()["n"]
     pending = plans.list_changes(c, "pending")
@@ -328,6 +345,13 @@ def duplicate_resolve(local_id: int, action: str) -> RedirectResponse:
     return back("/inbox", msg="Dublette aufgelöst.")
 
 
+@app.post("/sessions/{session_id}/publish-retry")
+def publish_retry(session_id: int) -> RedirectResponse:
+    """Nach Prüfung in intervals.icu: Einheit ist dort nicht vorhanden -> beim nächsten Veröffentlichen neu senden."""
+    conn().execute("UPDATE plan_sessions SET publish_unknown = 0, publish_error = NULL WHERE id = ?", (session_id,))
+    return back("/inbox", msg="Freigegeben – wird beim nächsten Veröffentlichen neu angelegt.")
+
+
 @app.post("/sync")
 def sync_now() -> RedirectResponse:
     from ..sync import run_sync
@@ -369,10 +393,13 @@ async def activity_update(request: Request, activity_id: int) -> RedirectRespons
     for key in ("name", "notes", "sport", "start_date"):
         if key in form:
             fields[key] = str(form[key])
-    if form.get("rpe"):
-        fields["rpe"] = int(form["rpe"])
-    if form.get("duration_min"):
-        fields["duration_s"] = int(float(form["duration_min"]) * 60)
+    try:
+        if form.get("rpe"):
+            fields["rpe"] = int(form["rpe"])
+        if form.get("duration_min"):
+            fields["duration_s"] = int(float(str(form["duration_min"]).replace(",", ".")) * 60)
+    except ValueError:
+        return back(f"/activity/{activity_id}", err="RPE und Dauer müssen Zahlen sein.")
     fields["is_endurance"] = 1 if form.get("is_endurance") else 0
     fields["excluded"] = 1 if form.get("excluded") else 0
     act = activities.get_activity(conn(), activity_id)
@@ -396,6 +423,8 @@ async def activity_create(request: Request) -> RedirectResponse:
                                       name=str(form.get("name") or "") or None, notes=str(form.get("notes") or "") or None)
     except (activities.ActivityError, ValueError, KeyError) as exc:
         return back("/calendar", err=str(exc))
+    from ..publisher import reconcile
+    reconcile(conn())  # nachgetragene Einheit mit dem Plan verbinden (auch zuvor als übersprungen markierte)
     return back(f"/activity/{act['id']}", msg="Aktivität erfasst.")
 
 
@@ -434,18 +463,32 @@ async def plans_create(request: Request) -> RedirectResponse:
 
 @app.post("/plans/{plan_id}/archive")
 def plans_archive(plan_id: int) -> RedirectResponse:
-    plans.archive_plan(conn(), plan_id)
-    return back("/plans", msg="Plan archiviert.")
+    res = plans.archive_plan(conn(), plan_id)
+    return back("/plans", msg=f"Plan archiviert. {res['dropped']} künftige Einheiten entfernt, "
+                              f"{res['cancelled_published']} werden beim nächsten Veröffentlichen aus intervals.icu gelöscht.")
 
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_view(request: Request) -> HTMLResponse:
-    return render(request, "settings.html", settings=all_settings(conn()))
+    return render(request, "settings.html",
+                  settings={k: v for k, v in all_settings(conn()).items() if k != "publish_lock"})
 
 
 @app.post("/settings")
 async def settings_save(request: Request) -> RedirectResponse:
     form = await request.form()
+    values, errors = {}, []
     for k, v in form.items():
-        set_setting(conn(), k, str(v).strip())
+        if k == "publish_lock":
+            continue
+        try:
+            values[k] = validate_setting(k, v)
+        except SettingError as exc:
+            errors.append(str(exc))
+    if errors:
+        return back("/settings", err="Nicht gespeichert:\n" + "\n".join(errors))
+    c = conn()
+    with transaction(c):  # alles oder nichts
+        for k, v in values.items():
+            set_setting(c, k, v, validate=False)
     return back("/settings", msg="Einstellungen gespeichert.")

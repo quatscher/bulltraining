@@ -75,7 +75,9 @@
 
 {% if publish_errors %}
 <h2>Upload-Fehler</h2>
-<div class="card">{% for e in publish_errors %}<div class="small"><b>{{ e.date }} {{ e.title }}</b>: <span class="bad">{{ e.publish_error }}</span></div>{% endfor %}</div>
+<div class="card">{% for e in publish_errors %}<div class="small" style="margin:4px 0"><b>{{ e.date }} {{ e.title }}</b>: <span class="bad">{{ e.publish_error }}</span>
+  {% if e.publish_unknown %}<br><span class="muted">Antwort von intervals.icu ging verloren – dort prüfen. Wenn die Einheit fehlt:</span>
+  <form class="inline" method="post" action="/sessions/{{ e.id }}/publish-retry"><button>Erneut senden</button></form>{% endif %}</div>{% endfor %}</div>
 {% endif %}
 
 <h2>Änderungsprotokoll</h2>

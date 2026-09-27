@@ -499,3 +499,43 @@ Die Architektur trägt und ist weitgehend wie beschrieben umgesetzt. Beim Umsetz
 - Feldnamen der intervals.icu-Antworten (`icu_training_load`, `icu_zone_times`, `icu_hr_zone_times`, `icu_rpe`, Wellness `sleepSecs`) werden defensiv gelesen; nach dem ersten echten Sync in `raw` prüfen.
 - Intervals-Syntax für `% Pace`, `ramp` und Schwimmdistanzen (`mtr`) auf der Uhr prüfen.
 - Schwellenwerte aus Tests nach intervals.icu zurückschreiben (Sport-Einstellungen); bislang nur Abweichungsanzeige.
+
+## Code-Reviews 27.09.2026 (Codex)
+
+**Runde 1** (`review/REVIEW_2026-09-27.md`, 21 Findings, 23 Reproduktionen): alle reproduziert und behoben;
+Regressionstests mit dem gewünschten Verhalten in `tests/test_review_regressions.py`.
+
+**Runde 2** (`review/FIX_REVIEW_2026-09-27.md`, Nachprüfung der Fixes): zwei P1- und fünf P2-Restfehler, alle
+reproduziert und behoben; Tests in `tests/test_review_recheck.py`. Die Nachprüfung hat zu Recht festgestellt, dass
+Runde 1 nicht vollständig war – insbesondere Publisher-Zustände und die Workout-Validierung.
+
+Die tragenden Entscheidungen:
+
+- **Transaktionen:** Verbindung je Thread, `BEGIN IMMEDIATE`, Sperre je Verbindung.
+- **Bestätigen ist eine atomare Prüfung:** Planstatus, unveränderte und änderbare Einheiten, Regeln auf dem
+  tatsächlichen Ergebnis. Planerstellung inklusive Auswertung in einer Transaktion.
+- **Undo nur konfliktfrei**, IDs nie wiederverwendet: `AUTOINCREMENT`, Sequenz auch über IDs aus der
+  Änderungshistorie; vor der Migration bereits kollidierte IDs werden beim Undo erkannt und gemeldet.
+- **Revision je Einheit:** Jede Planänderung erhöht `plan_sessions.revision`. Der Publisher schreibt Rückmeldungen
+  nur gegen die versendete Revision; ändert sich eine Einheit während des HTTP-Aufrufs, bleibt die externe ID
+  erhalten und der neuere Stand wird im selben Lauf nachgezogen. Während einer Löschung wiederhergestellte Einheiten
+  werden neu angelegt, während des ersten Uploads gelöschte wieder entfernt.
+- **Unklare POST-Antworten** (Timeout, 5xx): Einheit wird markiert (`publish_unknown`), vor erneutem Senden per
+  `find_event` in intervals.icu gesucht; ohne Suchmöglichkeit bleibt sie im Posteingang zur Klärung stehen.
+- **Workout-Syntax mit striktem Parser** (`workout_syntax.py`): klar begrenzter Umfang (Beschriftungen,
+  beschriftete Wiederholungen, %/Watt/Pace/HR/Zonen/Rampe, Trittfrequenz). Eigene Beschreibungen müssen vollständig
+  verstanden sein, sonst Ablehnung mit Zeilenangabe; Dauer, Last und Intensität stammen aus den Schritten.
+- **Sync:** Detailfelder bleiben erhalten, sRPE-Last immer aus der wirksamen RPE (Messlast bleibt unberührt),
+  an der Quelle gelöschte Aktivitäten werden im vollständig geladenen Fenster entfernt.
+- **Stichtage:** Tests, Schwellen und Leistungszustand werden zum Stichtag aus der Testhistorie bestimmt; die
+  Einstellung (manuelle Übersteuerung) gilt nur für die Gegenwart.
+- **Eingaben:** typisierte Einstellungen (Speichern und Lesen), geprüfte Aktivitätskorrekturen, keine
+  Testergebnisse in der Zukunft, Verfügbarkeit als Regel, Schreibzugriffe nur von der eigenen Seite.
+
+**Bewusste Grenzen:**
+
+- Eine leere Aktivitätsliste bei mindestens drei lokal vorhandenen Aktivitäten löscht nichts – Schutz gegen
+  API-Fehler, also keine vollständige Spiegelung in diesem Sonderfall.
+- intervals.icu bietet keine Idempotenzgarantie für POST; der Abgleich nach unklarer Antwort sucht per Tag, Name und
+  Kategorie. Zwei gleichnamige Einheiten am selben Tag könnten verwechselt werden.
+- Keine UUIDs und keine persistente Outbox: Revision, Sperre und Abgleich decken die reproduzierten Fälle ab.

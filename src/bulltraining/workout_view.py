@@ -11,7 +11,8 @@ from typing import Any
 
 from .db import get_float
 from .util import fmt_pace
-from .zonemodel import ZONE_COLORS, ZONES, _HRZ, _PCT, _REPEAT, _STEP, _duration_s, _target_zone
+from . import workout_syntax as syntax
+from .zonemodel import ZONE_COLORS, ZONES
 
 ZONE_WORD = ["locker", "Grundlage", "Tempo", "Schwelle", "hart"]
 # Zielbänder je Zone (5-Zonen-Modell) für Näherungen, wenn die Vorgabe eine andere Größe nutzt
@@ -76,38 +77,43 @@ def _duration_text(dur: str) -> str:
     return " ".join(f"{n} {'h' if u == 'h' else ('min' if u == 'm' else 's')}" for n, u in parts)
 
 
-def step_detail(th: Thresholds, sport: str, dur: str, target: str) -> dict[str, Any]:
-    zone, frac = _target_zone(sport, target)
-    t = target.strip().lower()
+def step_detail(th: Thresholds, sport: str, step: dict[str, Any]) -> dict[str, Any]:
+    """Anzeige eines geparsten Schritts: Wort, Zone und konkrete Ziele aus den aktuellen Schwellen."""
+    tg = step["target"]
+    kind, zone = tg["kind"], tg["zone"]
     targets: list[tuple[str, str]] = []
     word = ZONE_WORD[zone]
     z_lo = z_hi = zone
-    pct = _PCT.search(t)
-    hrz = _HRZ.search(t)
-    is_hr = bool(hrz) and "hr" in t.split()
-    if not t or t.startswith("rest"):
-        word = "Pause" if sport == "swim" or t.startswith("rest") else "locker"
-    elif "max" in t.split():
+    hr_given = False
+    if kind == "rest":
+        word = "Pause"
+    elif kind == "max":
         word = "maximal"
         targets.append(("Intensität", "so schnell wie möglich, gleichmäßig"))
-    elif pct:
-        lo = float(pct.group(1))
-        hi = float(pct.group(2) or pct.group(1))
-        if "ramp" in t:
-            word = "Rampe"
-            if sport == "ride" and th.ftp:
-                targets.append(("Leistung", f"{round(th.ftp * lo / 100)} W → {round(th.ftp * hi / 100)} W, bis zum Abbruch"))
-        elif sport == "ride" or "pace" not in t:
-            power = _power_range(th, lo, hi)
-            targets.append(("Leistung", power or f"{_pct(lo, hi)} FTP"))
-        else:
-            pace = _pace_range(th, sport, lo, hi)
-            targets.append(("Pace", pace or f"{_pct(lo, hi)} der Schwellenpace"))
-    elif hrz:
-        z_lo = max(0, min(4, int(hrz.group(1)) - 1))
-        z_hi = max(0, min(4, int(hrz.group(2) or hrz.group(1)) - 1))
+    elif kind == "ramp":
+        word = "Rampe"
+        if sport == "ride" and th.ftp:
+            targets.append(("Leistung", f"{round(th.ftp * tg['lo'] / 100)} W → {round(th.ftp * tg['hi'] / 100)} W, "
+                                        "bis zum Abbruch"))
+    elif kind == "pct" and tg["unit"] == "ftp":
+        targets.append(("Leistung", _power_range(th, tg["lo"], tg["hi"]) or f"{_pct(tg['lo'], tg['hi'])} FTP"))
+    elif kind == "pct":
+        targets.append(("Pace", _pace_range(th, sport, tg["lo"], tg["hi"]) or f"{_pct(tg['lo'], tg['hi'])} der Schwellenpace"))
+    elif kind == "watts":
+        targets.append(("Leistung", f"{tg['lo']:.0f} W" if tg["lo"] == tg["hi"] else f"{tg['lo']:.0f}–{tg['hi']:.0f} W"))
+    elif kind == "pace_abs":
+        unit = _unit(sport)
+        fast, slow = fmt_pace(tg["fast"], ""), fmt_pace(tg["slow"], "")
+        targets.append(("Pace", f"{fast}{unit}" if fast == slow else f"{fast}–{slow}{unit}"))
+    elif kind == "hr_pct":
+        hr_given = True
+        lthr = th.lthr.get(sport)
+        targets.append(("Puls", f"{round(lthr * tg['lo'] / 100)}–{round(lthr * tg['hi'] / 100)} bpm" if lthr
+                        else f"{_pct(tg['lo'], tg['hi'])} Schwellenpuls"))
+    elif kind == "zone":
+        z_lo, z_hi = tg["z_lo"], tg["z_hi"]
+        hr_given = tg["unit"] == "hr"
         word = ZONE_WORD[z_hi] if z_lo == z_hi else f"{ZONE_WORD[z_lo]} bis {ZONE_WORD[z_hi]}"
-        # Pulsvorgabe: Pace/Leistung nur als Orientierung dazu
         if sport in SPEED_BAND:
             approx = _pace_range(th, sport, SPEED_BAND[sport][z_lo][0], SPEED_BAND[sport][z_hi][1])
             if approx:
@@ -116,53 +122,39 @@ def step_detail(th: Thresholds, sport: str, dur: str, target: str) -> dict[str, 
             approx = _power_range(th, POWER_BAND[z_lo][0], POWER_BAND[z_hi][1])
             if approx:
                 targets.append(("Leistung ca.", approx))
-    hr = _hr_range(th, sport, z_lo, z_hi)
-    if hr and word not in ("maximal", "Rampe"):
-        targets.append(("Puls" if is_hr else "Puls ca.", hr))
-    elif is_hr and not hr:
-        targets.append(("Puls", f"Zone {hrz.group(0).upper()}"))
-    est = _duration_s(dur, sport, frac, th.pace.get(sport))
-    is_distance = dur.lower().endswith(("mtr", "km"))
-    return {"type": "step", "duration": _duration_text(dur), "duration_s": round(est),
-            "estimated": is_distance, "zone": zone, "zone_label": ZONES[zone], "color": ZONE_COLORS[zone],
-            "word": word, "targets": targets, "raw": f"- {dur} {target}".strip()}
+    elif kind == "unknown":
+        targets.append(("Vorgabe", step["target_text"] or "–"))
+    if kind not in ("max", "ramp", "rest", "hr_pct", "unknown"):
+        hr = _hr_range(th, sport, z_lo, z_hi)
+        if hr:
+            targets.append(("Puls" if hr_given else "Puls ca.", hr))
+        elif hr_given:
+            label = f"Z{z_lo + 1}" if z_lo == z_hi else f"Z{z_lo + 1}-Z{z_hi + 1}"
+            targets.append(("Puls", f"Zone {label}"))
+    if step["label"]:
+        word = f"{step['label']} · {word}"
+    return {"type": "step", "duration": _duration_text(step["dur"]), "duration_s": round(step["seconds"]),
+            "estimated": step["distance"], "zone": zone, "zone_label": ZONES[zone], "color": ZONE_COLORS[zone],
+            "word": word, "targets": targets, "raw": f"- {step['dur']} {step['target_text']}".strip()}
 
 
 def workout_steps(conn: sqlite3.Connection | Thresholds, sport: str, description: str | None) -> list[dict[str, Any]]:
     """Schritte, Wiederholungsblöcke und Zwischenüberschriften einer Beschreibung."""
     th = conn if isinstance(conn, Thresholds) else Thresholds(conn)
+    parsed = syntax.parse(description, sport, ftp=th.ftp, pace=th.pace.get(sport))
     items: list[dict[str, Any]] = []
-    block: dict[str, Any] | None = None
-    for raw in (description or "").splitlines():
-        line = raw.strip()
-        if not line:
-            block = None
-            continue
-        rep = _REPEAT.match(line)
-        if rep:
-            block = {"type": "repeat", "count": int(rep.group(1)), "steps": []}
-            items.append(block)
-            continue
-        m = _STEP.match(line)
-        if m:
-            step = step_detail(th, sport, m.group("dur"), m.group("target"))
-            (block["steps"] if block else items).append(step)
-            continue
-        block = None
-        if _GENERATED_NOTE.match(line):
-            continue  # vom Generator gespeicherte Zielwerte veralten mit jedem Test – hier wird live gerechnet
-        items.append({"type": "text", "text": line})
-    # "1x" ist kein echter Block
-    flat: list[dict[str, Any]] = []
-    for it in items:
-        if it["type"] == "repeat" and it["count"] == 1:
-            flat.extend(it["steps"])
+    for it in parsed:
+        if it["type"] == "text":
+            if not _GENERATED_NOTE.match(it["text"]):  # gespeicherte Zielwerte veralten – hier wird live gerechnet
+                items.append({"type": "text", "text": it["text"]})
+        elif it["type"] == "step":
+            items.append(step_detail(th, sport, it))
+        elif it["count"] == 1:  # "1x" ist kein echter Block
+            items.extend(step_detail(th, sport, s) for s in it["steps"])
         else:
-            flat.append(it)
-    items = flat
-    for it in items:
-        if it["type"] == "repeat":
-            it["duration_s"] = it["count"] * sum(s["duration_s"] for s in it["steps"])
+            steps = [step_detail(th, sport, s) for s in it["steps"]]
+            items.append({"type": "repeat", "count": it["count"], "label": it["label"], "steps": steps,
+                          "duration_s": it["count"] * sum(s["duration_s"] for s in steps)})
     return items
 
 

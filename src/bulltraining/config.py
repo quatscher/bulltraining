@@ -15,6 +15,31 @@ USER_AGENT = (
     "(KHTML, like Gecko) Chrome/128.0 Safari/537.36 bulltraining/0.1"
 )
 
+# Erlaubte Werte je Einstellung: (Typ, min, max, leer erlaubt). Ungültiges wird beim Speichern abgewiesen und
+# beim Lesen durch den Standard ersetzt – eine Tippfehler-Einstellung darf keine Seite lahmlegen.
+SETTINGS_SCHEMA: dict[str, tuple] = {
+    "srpe_factor": ("float", 0.01, 5, False),
+    "max_weekly_load_increase_pct": ("float", 0, 50, False),
+    "max_hard_days": ("int", 0, 7, False),
+    "max_ctl_ramp_per_week": ("float", 0.5, 20, False),
+    "underload_min_pct": ("float", 0, 100, False),
+    "long_session_max_increase_pct": ("float", 0, 100, False),
+    "recovery_week_pct": ("float", 20, 100, False),
+    "baseline_weeks": ("int", 1, 12, False),
+    "test_validity_days": ("int", 7, 365, False),
+    "retest_lead_days": ("int", 0, 60, False),
+    "ftp_w": ("float", 50, 600, True),
+    "lthr_run": ("float", 100, 210, True),
+    "lthr_ride": ("float", 100, 210, True),
+    "threshold_pace_run_s_per_km": ("float", 150, 600, True),
+    "css_s_per_100m": ("float", 55, 240, True),
+    "max_hr": ("float", 120, 230, True),
+    "manual_baseline": ("baseline_json", None, None, True),
+    "strength_minutes": ("int", 10, 180, False),
+    "strength_description": ("text", None, None, True),
+    "publish_lock": ("text", None, None, True),
+}
+
 # Alle Grenzwerte sind Einstellungen, kein Code. Werte als Strings, wie sie in `settings` liegen.
 DEFAULT_SETTINGS: dict[str, str] = {
     # Belastung
@@ -44,4 +69,5 @@ DEFAULT_SETTINGS: dict[str, str] = {
     # Krafttraining: Dauer und Inhalt der geplanten Einheiten
     "strength_minutes": "45",
     "strength_description": "",
+    "publish_lock": "",
 }

@@ -79,6 +79,14 @@ class IntervalsClient:
         return self._request("GET", f"/api/v1/athlete/{self.athlete_id}/events",
                              params={"oldest": oldest, "newest": newest}) or []
 
+    def find_event(self, day: str, name: str, category: str) -> dict | None:
+        """Event am Tag mit gleichem Namen und gleicher Kategorie – Abgleich nach unklarer POST-Antwort."""
+        for e in self.events(day, day):
+            if e.get("name") == name and e.get("category") == category \
+                    and str(e.get("start_date_local", ""))[:10] == day:
+                return e
+        return None
+
     # --- schreibend (nur Publisher) -------------------------------------------
     def create_event(self, payload: dict) -> dict:
         return self._request("POST", f"/api/v1/athlete/{self.athlete_id}/events", json=payload)

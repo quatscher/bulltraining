@@ -41,6 +41,37 @@ WORK_REST = {
 THRESHOLD_KEY = {"ride": "ftp_w", "run": "threshold_pace_run_s_per_km", "swim": "css_s_per_100m"}
 
 
+ZONE_IF = (0.55, 0.68, 0.80, 0.92, 1.05)  # Intensitätsfaktor je Zone des 5-Zonen-Modells
+
+
+def from_description(conn: sqlite3.Connection, sport: str, description: str) -> dict[str, Any] | None:
+    """Dauer, Last und Intensität aus einer Beschreibung in Intervals-Syntax; None, wenn nichts auswertbar ist.
+
+    Strikt: jede steuernde Zeile muss verstanden sein, sonst WorkoutSyntaxError – die Beschreibung geht so auf
+    die Uhr, eine still übersprungene Zeile würde Dauer oder Belastung verfälschen."""
+    from . import workout_syntax as syntax
+    from .zonemodel import reference_paces
+    items = syntax.parse(description, sport, ftp=get_float(conn, "ftp_w"),
+                         pace=reference_paces(conn).get(sport), strict=True)
+    secs = syntax.zone_seconds(items)
+    if sum(secs) <= 0:
+        return None
+    total = sum(secs)
+    load = sum(s / 3600 * f ** 2 * 100 for s, f in zip(secs, ZONE_IF))
+    share = [s / total for s in secs]
+    if share[4] >= 0.08:
+        intensity = "vo2"
+    elif share[3] + share[4] >= 0.10:
+        intensity = "threshold"
+    elif share[2] >= 0.15:
+        intensity = "tempo"
+    elif share[0] >= 0.9:
+        intensity = "recovery"
+    else:
+        intensity = "long" if total >= 90 * 60 else "easy"
+    return {"duration_s": int(round(total)), "target_load": round(load, 1), "intensity": intensity}
+
+
 def estimate_load(duration_min: float, intensity: str) -> float:
     return round(duration_min / 60 * IF.get(intensity, 0.65) ** 2 * 100, 1)
 
@@ -49,7 +80,8 @@ class _Targets:
     def __init__(self, conn: sqlite3.Connection, sport: str):
         self.sport = sport
         self.threshold = get_float(conn, THRESHOLD_KEY[sport]) if sport in THRESHOLD_KEY else None
-        # Nur ein gültiger (nicht veralteter) Test zählt als Grundlage für %-Vorgaben.
+        # Jeder vorhandene Test ist Grundlage für %-Vorgaben – auch ein veralteter (der Generator setzt dann einen
+        # Retest an). Ohne jeden Test wird nach Pulszone vorgegeben.
         self.valid = self.threshold is not None and test_status(conn, sport)["status"] != "missing"
 
     def step(self, minutes: int, zone: str) -> str:
@@ -101,10 +133,13 @@ def build(conn: sqlite3.Connection, sport: str, intensity: str, duration_min: in
         work, rest = WORK_REST[sport][intensity]
         wu, cd = (15, 10) if sport != "swim" else (10, 5)
         main = duration_min - wu - cd
-        reps = max(2 if intensity != "tempo" else 1, min(6, main // (work + rest)))
-        if reps * (work + rest) > main:  # zu kurz für zwei Wiederholungen: Arbeitsphase kürzen
-            work = max(2, main // reps - rest)
-        filler = main - reps * (work + rest)
+        reps = min(6, main // (work + rest))
+        if reps < 2 and intensity != "tempo" and main >= 2 * (rest + 3):
+            reps, work = 2, main // 2 - rest  # lieber zwei kürzere Wiederholungen als eine lange
+        elif reps < 1:
+            reps, work = 1, max(2, main - rest)
+            rest = min(rest, main - work)
+        filler = main - reps * (work + rest)  # Rest locker, damit die Summe exakt der Dauer entspricht
         title += f" {reps}x{work}"
         note = t.note(intensity)
         lines += ["Einlaufen" if sport == "run" else "Aufwärmen", t.step(wu, "wu"), ""]
@@ -138,6 +173,11 @@ def build(conn: sqlite3.Connection, sport: str, intensity: str, duration_min: in
             lines.append(note)
         lines.append(t.step(duration_min, zone))
         title += f" {duration_min} min"
-    return {"title": title, "description": "\n".join(l for l in lines if l is not None).strip(),
+    description = "\n".join(l for l in lines if l is not None).strip()
+    from .zonemodel import description_zone_secs
+    steps = description_zone_secs(description, sport)
+    if steps and sum(steps) > 0 and abs(sum(steps) - duration_min * 60) > 1:
+        duration_min = round(sum(steps) / 60)  # Planung, Last und Export rechnen mit derselben Dauer
+    return {"title": title, "description": description,
             "duration_s": duration_min * 60, "target_load": estimate_load(duration_min, intensity),
             "intensity": intensity, "category": "WORKOUT", "test_protocol": None}

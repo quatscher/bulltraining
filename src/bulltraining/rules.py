@@ -15,6 +15,7 @@ from .periodization import taper_start, week_effective, week_targets
 from .util import ENDURANCE_SPORTS, monday_of, to_date, week_days
 
 LOAD_TOLERANCE = 0.03
+WEEKDAY_KEYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 
 
 def _active(sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -37,7 +38,7 @@ def validate_weeks(conn: sqlite3.Connection, plan: dict[str, Any], state: list[d
         n_hard = sum(1 for d in days if d in hard_days)
         if n_hard > max_hard:
             errors.append(f"{label}: {n_hard} harte Tage, erlaubt sind höchstens {max_hard}.")
-        for d in days:
+        for d in [monday - timedelta(days=1)] + days:  # Vortag einschließen: Sonntag -> Montag der Woche
             if d in hard_days and d + timedelta(days=1) in hard_days and d + timedelta(days=1) >= today:
                 errors.append(f"{label}: harte Tage in Folge am {d.isoformat()} und {(d + timedelta(days=1)).isoformat()}.")
         # 2) mindestens ein vollständig freier Tag (vergangene Tage zählen nach tatsächlichen Aktivitäten)
@@ -69,7 +70,19 @@ def validate_weeks(conn: sqlite3.Connection, plan: dict[str, Any], state: list[d
             if cap and s["duration_s"] / 60 > cap * (1 + LOAD_TOLERANCE):
                 errors.append(f"{label}: {s['title']} ({s['duration_s'] / 60:.0f} min) über der Grenze von {cap} min "
                               f"für {s['sport']} (längste Einheit der letzten Wochen + Aufschlag).")
-        # 5) Intensität ohne Testgrundlage: nur Hinweis
+        # 5) Verfügbarkeit: Sportart an diesem Tag erlaubt und Zeitfenster lang genug
+        from .generator import availability  # spät importiert, vermeidet Zyklus
+        avail = availability(plan)
+        for s in week:
+            if to_date(s["date"]) < today or s["sport"] not in avail or s.get("category") == "RACE":
+                continue
+            day = WEEKDAY_KEYS[to_date(s["date"]).weekday()]
+            if day not in avail[s["sport"]]:
+                errors.append(f"{label}: {s['title']} am {s['date']} – {s['sport']} ist an diesem Wochentag nicht verfügbar.")
+            elif avail[s["sport"]][day] and s["duration_s"] / 60 > avail[s["sport"]][day] * (1 + LOAD_TOLERANCE):
+                errors.append(f"{label}: {s['title']} ({s['duration_s'] // 60} min) passt nicht ins Zeitfenster "
+                              f"von {avail[s['sport']][day]} min.")
+        # 6) Intensität ohne Testgrundlage: nur Hinweis
         for s in week:
             if s.get("intensity") in ("threshold", "vo2") and s["sport"] in ENDURANCE_SPORTS \
                     and test_status(conn, s["sport"], monday)["status"] == "missing":

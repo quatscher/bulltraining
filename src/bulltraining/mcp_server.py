@@ -7,7 +7,7 @@ from typing import Any
 from mcp.server import MCPServer
 
 from . import activities, metrics, performance, plans
-from .db import connect
+from .db import thread_connection
 from .periodization import week_targets
 from .util import monday_of, parse_week
 from .workout_view import steps_as_text, workout_steps
@@ -26,10 +26,9 @@ _conn = None
 
 
 def conn():
-    global _conn
-    if _conn is None:
-        _conn = connect()
-    return _conn
+    """Verbindung je Thread (parallele Anfragen dürfen sich keine Transaktion teilen).
+    `_conn` kann in Tests auf eine feste Verbindung gesetzt werden."""
+    return _conn if _conn is not None else thread_connection()
 
 
 def _err(exc: Exception) -> dict[str, Any]:
@@ -150,6 +149,8 @@ def log_activity(date: str, sport: str, duration_min: float, rpe: int | None = N
     try:
         row = activities.log_activity(conn(), date=date, sport=sport, duration_min=duration_min, rpe=rpe,
                                       hr_avg=hr_avg, name=name, notes=notes, time=time)
+        from .publisher import reconcile
+        reconcile(conn())
         return {"ok": True, "inserted": row}
     except activities.ActivityError as exc:
         return _err(exc)

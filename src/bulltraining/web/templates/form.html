@@ -9,7 +9,7 @@
   <div class="card"><div class="muted small">Form (TSB)</div><div class="big {{ 'bad' if state.form_endurance < -25 else ('ok' if state.form_endurance > -10 else 'warn') }}">{{ state.form_endurance }}</div></div>
   <div class="card"><div class="muted small">CTL gesamt (inkl. Kraft)</div><div class="big">{{ state.ctl_total }}</div><div class="small muted">Form gesamt {{ state.form_total }}</div></div>
   <div class="card"><div class="muted small">HRV 7 Tage</div>
-    {% if state.hrv.available %}<div class="big {{ 'bad' if state.hrv.deviation_sd < -1 else ('warn' if state.hrv.deviation_sd < -0.5 else 'ok') }}">{{ state.hrv.mean_7d }}</div>
+    {% if state.hrv.available and state.hrv.deviation_sd is not none %}<div class="big {{ 'bad' if state.hrv.deviation_sd < -1 else ('warn' if state.hrv.deviation_sd < -0.5 else 'ok') }}">{{ state.hrv.mean_7d }}</div>
     <div class="small muted">Baseline {{ state.hrv.baseline_60d }} · {{ state.hrv.deviation_sd }} SD · {{ state.hrv.days_below_baseline_in_row }} Tage darunter</div>
     {% else %}<div class="muted small">{{ state.hrv.reason }}</div>{% endif %}</div>
 </div>

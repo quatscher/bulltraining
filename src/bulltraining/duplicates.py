@@ -60,8 +60,8 @@ def resolve(conn: sqlite3.Connection, local_id: int, action: str) -> None:
         if action == "keep_external":
             # RPE der lokalen Erfassung ist oft das einzige subjektive Maß – übernehmen, falls extern leer.
             if ext["rpe"] is None and local["rpe"] is not None:
-                conn.execute("UPDATE activities SET rpe = ?, user_locked = 1, updated_at = ? WHERE id = ?",
-                             (local["rpe"], now_iso(), ext["id"]))
+                from .activities import update_activity  # berechnet die Last aus der RPE mit
+                update_activity(conn, ext["id"], rpe=local["rpe"])
             conn.execute("UPDATE plan_sessions SET activity_id = ? WHERE activity_id = ?", (ext["id"], local_id))
             conn.execute("UPDATE performance_tests SET activity_id = ? WHERE activity_id = ?", (ext["id"], local_id))
             conn.execute("DELETE FROM activities WHERE id = ?", (local_id,))

@@ -88,13 +88,20 @@ def hrv_status(conn: sqlite3.Connection, today: date | None = None) -> dict[str,
         return {"available": False, "reason": "weniger als 14 HRV-Werte in 60 Tagen"}
     base_mean, base_sd = hrv.mean(), hrv.std() or 1.0
     recent = rows[rows["date"] > (today - timedelta(days=7)).isoformat()]["hrv"].dropna()
-    last7 = recent.mean() if not recent.empty else float("nan")
+    if recent.empty:
+        # Baseline vorhanden, aber keine aktuelle Messung: keine Abweichung behaupten
+        return {"available": False, "reason": "keine HRV-Messung in den letzten 7 Tagen",
+                "baseline_60d": _r(base_mean), "sd": _r(base_sd), "mean_7d": None, "deviation_sd": None,
+                "days_below_baseline_in_row": 0}
+    last7 = recent.mean()
+    by_day = {r["date"]: r["hrv"] for _, r in rows.iterrows() if pd.notna(r["hrv"])}
     below = 0
-    for v in reversed(hrv.tolist()):
-        if v < base_mean - 0.5 * base_sd:
-            below += 1
-        else:
-            break
+    day = today
+    if day.isoformat() not in by_day:
+        day -= timedelta(days=1)  # heutiger Wert fehlt oft noch morgens
+    while by_day.get(day.isoformat()) is not None and by_day[day.isoformat()] < base_mean - 0.5 * base_sd:
+        below += 1  # nur lückenlose Kalendertage zählen
+        day -= timedelta(days=1)
     return {"available": True, "baseline_60d": _r(base_mean), "sd": _r(base_sd), "mean_7d": _r(last7),
             "deviation_sd": _r((last7 - base_mean) / base_sd, 2), "days_below_baseline_in_row": below}
 
@@ -326,10 +333,12 @@ def manual_baseline(conn: sqlite3.Connection) -> dict[str, Any] | None:
     raw = get_setting(conn, "manual_baseline")
     if not raw:
         return None
+    from .db import SettingError, _validate_manual_baseline
     try:
+        _validate_manual_baseline(raw)
         return json.loads(raw)
-    except ValueError:
-        return None
+    except (ValueError, SettingError):
+        return None  # fehlerhafte Altwerte: so, als gäbe es keine Selbstauskunft
 
 
 def _baseline_from_manual(m: dict[str, Any], as_of: date, weeks: int, state: dict[str, Any]) -> dict[str, Any]:

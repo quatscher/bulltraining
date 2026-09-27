@@ -21,7 +21,7 @@
   {% if it.type == 'text' %}<div class="{{ 'sthead' if it.text|length <= 40 else 'stnote' }}">{{ it.text }}</div>
   {% elif it.type == 'step' %}{{ step_row(it) }}
   {% else %}
-  <div class="rep"><div class="rephead">{{ it.count }}× wiederholen <span class="muted small">· {{ (it.duration_s / 60)|round|int }} min</span></div>
+  <div class="rep"><div class="rephead">{% if it.label %}{{ it.label }} · {% endif %}{{ it.count }}× wiederholen <span class="muted small">· {{ (it.duration_s / 60)|round|int }} min</span></div>
     {% for s in it.steps %}{{ step_row(s) }}{% endfor %}
   </div>
   {% endif %}
