@@ -27,7 +27,7 @@ PROTOCOLS: dict[str, dict[str, Any]] = {
                    "Schwellenpuls Rad = 95 % des Durchschnittspulses.",
         "inputs": {"avg_power_20min_w": ("Ø Leistung 20 min in Watt", True),
                    "avg_hr_20min": ("Ø Puls 20 min", False), "max_hr": ("höchster Puls", False)},
-        "duration_min": 65,
+        "duration_min": 65, "load_if": 0.85,
         "description": ("Einfahren\n- 15m 55-65%\n\n3x\n- 1m 100%\n- 1m 55%\n\n- 5m 105%\n- 10m 50%\n\n"
                         "Test: 20 Minuten so hoch wie gleichmäßig haltbar\n- 20m 100%\n\nAusfahren\n- 10m 50%"),
     },
@@ -35,7 +35,7 @@ PROTOCOLS: dict[str, dict[str, Any]] = {
         "sport": "ride", "name": "Rampentest",
         "summary": "Stufen je 1 min, +20 W bis zum Abbruch. FTP = 75 % der besten 1-min-Leistung.",
         "inputs": {"best_1min_power_w": ("beste 1-min-Leistung in Watt", True), "max_hr": ("höchster Puls", False)},
-        "duration_min": 40,
+        "duration_min": 40, "load_if": 0.80,
         "description": "Einfahren\n- 10m 50%\n\nRampe bis zum Abbruch, jede Minute +20 W\n- 25m ramp 50-150%\n\nAusfahren\n- 10m 45%",
     },
     "run_30min_tt": {
@@ -43,21 +43,21 @@ PROTOCOLS: dict[str, dict[str, Any]] = {
         "summary": "30 min allein maximal. Schwellenpace = Ø Pace, Schwellenpuls = Ø Puls der letzten 20 min.",
         "inputs": {"distance_m": ("Strecke in 30 min, Meter", True),
                    "avg_hr_last_20min": ("Ø Puls letzte 20 min", False), "max_hr": ("höchster Puls", False)},
-        "duration_min": 60,
+        "duration_min": 60, "load_if": 0.85,
         "description": "Einlaufen\n- 15m Z1-Z2 HR\n4x\n- 20s 110% Pace\n- 40s Z1 HR\n\nTest: 30 Minuten maximal gleichmäßig\n- 30m 100% Pace\n\nAuslaufen\n- 10m Z1 HR",
     },
     "run_5k_tt": {
         "sport": "run", "name": "5-km-Zeitlauf",
         "summary": "5 km maximal. Schwellenpace über Riegel-Formel auf 60 min hochgerechnet (Schätzung).",
         "inputs": {"time_5k": ("Zeit 5 km, mm:ss", True), "avg_hr": ("Ø Puls", False), "max_hr": ("höchster Puls", False)},
-        "duration_min": 50,
+        "duration_min": 50, "load_if": 0.83,
         "description": "Einlaufen\n- 15m Z1-Z2 HR\n4x\n- 20s 110% Pace\n- 40s Z1 HR\n\nTest: 5 km maximal\n- 5km 105% Pace\n\nAuslaufen\n- 10m Z1 HR",
     },
     "swim_css": {
         "sport": "swim", "name": "CSS-Test 400/200",
         "summary": "400 m und 200 m maximal mit Pause. CSS = (t400 − t200) / 2 je 100 m.",
         "inputs": {"t400": ("Zeit 400 m, mm:ss", True), "t200": ("Zeit 200 m, mm:ss", True)},
-        "duration_min": 45,
+        "duration_min": 45, "load_if": 0.75,
         "description": "Einschwimmen\n- 400mtr Z1\n4x\n- 50mtr Z3\n- 15s rest\n\nTest\n- 400mtr max\n- 5m rest\n- 200mtr max\n\nAusschwimmen\n- 200mtr Z1",
     },
 }

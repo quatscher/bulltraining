@@ -39,4 +39,9 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "threshold_pace_run_s_per_km": "",
     "css_s_per_100m": "",
     "max_hr": "",
+    # Ausgangsumfang aus Selbstauskunft, solange keine synchronisierten Daten vorliegen (JSON, siehe README)
+    "manual_baseline": "",
+    # Krafttraining: Dauer und Inhalt der geplanten Einheiten
+    "strength_minutes": "45",
+    "strength_description": "",
 }

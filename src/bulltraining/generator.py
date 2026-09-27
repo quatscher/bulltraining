@@ -18,6 +18,9 @@ from .performance import DEFAULT_PROTOCOL, test_status
 from .periodization import load_template, plan_sports, sport_shares, week_effective, week_targets
 from .util import ENDURANCE_SPORTS, WEEKDAYS, to_date, week_days, weekday_key
 
+MAX_TESTS_PER_WEEK = 2   # Tests sind hart und lastdicht
+MAX_TEST_LOAD_SHARE = 0.3  # ... und dürfen zusammen höchstens 30 % der Wochenlast ausmachen, sonst fällt der
+                           # gewohnte Umfang in der Testwoche weg; der erste Test ist immer erlaubt
 MIN_SESSION = {"swim": 30, "run": 30, "ride": 45, "other": 30}
 KEY_MIN = {"swim": 50, "run": 60, "ride": 75, "other": 45}
 RACE_MIN = {"triathlon_sprint": 80, "triathlon_olympic": 150, "triathlon_70.3": 330, "triathlon_full": 720,
@@ -172,37 +175,56 @@ def generate_week(conn: sqlite3.Connection, plan: dict[str, Any], monday: date,
              and (to_date(s["date"]) < today or s.get("status") in ("done", "skipped") or s.get("category") == "RACE")]
     week = _Week(monday, fixed, today, int(get_float(conn, "max_hard_days", 3)))
     avail = availability(plan)
+    baseline = training_baseline(conn, as_of=min(monday, today))
+    recurring = _recurring_sessions(conn, plan, monday, today, fixed)
+    for s in recurring:
+        week.slots[to_date(s["date"])].append(s)
     _choose_rest_day(week, avail)
-    shares = sport_shares(plan)
+    reduced = ctx["week_type"] in ("recovery", "taper", "race")
+    shares = sport_shares(plan, baseline, targets["target_hours"],
+                          reduction=targets["target_hours"] / targets["reference"]["hours"]
+                          if reduced and targets["reference"]["hours"] else None)
     # Anteil der Woche, der noch planbar ist (bei laufender Woche)
     open_fraction = len([d for d in week.days if d >= today]) / 7
     fixed_hours = sum(s["duration_s"] for s in fixed if s["sport"] in ENDURANCE_SPORTS and to_date(s["date"]) >= today) / 3600
     plan_hours = max(0.0, targets["target_hours"] * open_fraction - fixed_hours)
+    rec_min: dict[str, float] = {}
+    rec_n: dict[str, int] = {}
+    for s in recurring:
+        rec_min[s["sport"]] = rec_min.get(s["sport"], 0) + s["duration_s"] / 60
+        rec_n[s["sport"]] = rec_n.get(s["sport"], 0) + 1
     requests: list[dict[str, Any]] = []
 
     if ctx["week_type"] == "race":
         goal = to_date(plan["goal_date"])
         if not any(s.get("category") == "RACE" and to_date(s["date"]) == goal for s in fixed):
-            main = max(shares, key=shares.get) if shares else "run"
+            # Mehrkampf als eigene Einheit, sonst die Hauptsportart
+            multisport = (plan.get("goal_kind") or "").startswith("triathlon") or len(shares) > 2
+            main = "other" if multisport else (max(shares, key=shares.get) if shares else "run")
             race_min = RACE_MIN.get(plan.get("goal_kind") or "", 120)
             requests.append({"sport": main, "intensity": "race", "duration_s": race_min * 60, "fixed_date": goal,
                              "title": f"Wettkampf: {plan['name']}", "category": "RACE", "race_priority": plan.get("priority") or "A"})
     key_intensity = _key_intensity(plan, ctx)
-    baseline = training_baseline(conn, as_of=min(monday, today))
-    for sport, share in shares.items():
-        requests += _sport_requests(conn, plan, sport, plan_hours * 60 * share, ctx, targets, baseline,
-                                    key_intensity, avail, state, monday, today, warnings)
+    test_budget = {"left": MAX_TESTS_PER_WEEK, "load": targets["load_corridor"]["upper"] * MAX_TEST_LOAD_SHARE}
+    # nach Gewicht im Wettkampf: die größte Sportart bekommt zuerst ihren Test und damit ihre Qualitätseinheiten
+    for sport, share in sorted(shares.items(), key=lambda kv: -kv[1]):
+        # feste Einheiten (z. B. Pendeln) gehören zum Anteil ihrer Sportart
+        budget = max(0.0, plan_hours * 60 * share - rec_min.get(sport, 0))
+        requests += _sport_requests(conn, plan, sport, budget, ctx, targets, baseline,
+                                    key_intensity, avail, state, monday, today, warnings, rec_n.get(sport, 0),
+                                    test_budget)
 
     if "strength" in plan_sports(plan) and ctx["week_type"] != "race":
         habit = baseline["strength_sessions_per_week"]
         count = 1 if ctx["week_type"] in ("recovery", "taper") else max(1, min(2, round(habit) or 1))
         for _ in range(count):
-            requests.append({"sport": "strength", "intensity": "easy", "duration_s": 45 * 60})
+            requests.append({"sport": "strength", "intensity": "easy",
+                             "duration_s": get_float(conn, "strength_minutes", 45) * 60})
 
     # Platzierung: Wettkampf, Tests, lange Einheiten, Schlüsseleinheiten, locker, Kraft
     order = {"race": 0, "test": 1, "long": 2, "threshold": 3, "vo2": 3, "tempo": 4, "easy": 5, "recovery": 5}
     requests.sort(key=lambda r: (r["sport"] == "strength", order.get(r["intensity"], 6), -r["duration_s"]))
-    placed: list[dict[str, Any]] = []
+    placed: list[dict[str, Any]] = list(recurring)
     for req in requests:
         if req.get("fixed_date"):
             d = req["fixed_date"]
@@ -220,7 +242,13 @@ def generate_week(conn: sqlite3.Connection, plan: dict[str, Any], monday: date,
         if d is None:
             warnings.append(f"{req['sport']} {req['intensity']} ({req['duration_s'] / 60:.0f} min) fand keinen verfügbaren Tag")
             continue
-        minutes = max(10, int(round(req["duration_s"] / 60 / 5) * 5)) if req["intensity"] not in ("race", "test") else int(req["duration_s"] / 60)
+        if req["intensity"] in ("race", "test"):
+            minutes = int(req["duration_s"] / 60)
+        else:
+            minutes = max(10, int(round(req["duration_s"] / 60 / 5) * 5))
+            cap_min = targets["long_session_cap_min"].get(req["sport"])
+            if cap_min:
+                minutes = min(minutes, cap_min)
         built = workouts.build(conn, req["sport"], req["intensity"], minutes, req.get("protocol"))
         session = {"date": d.isoformat(), "sport": req["sport"], **built, "status": "planned"}
         if req.get("category") == "RACE":
@@ -229,8 +257,9 @@ def generate_week(conn: sqlite3.Connection, plan: dict[str, Any], monday: date,
         week.slots[d].append(session)
         placed.append(session)
 
-    fixed_load = week_effective(conn, monday, fixed, today)["load"]
-    _fit_load(conn, placed, targets, warnings, avail, fixed_load)
+    fixed_eff = week_effective(conn, monday, fixed, today)
+    fixed_load = fixed_eff["load"]
+    _fit_load(conn, placed, targets, warnings, avail, fixed_load, fixed_eff["hours"])
     placed.sort(key=lambda s: (s["date"], s["sport"]))
     planned_load = fixed_load + sum(s["target_load"] or 0 for s in placed if s["sport"] in ENDURANCE_SPORTS)
     return {"sessions": placed, "targets": targets, "fixed_load": fixed_load, "rest_day": week.rest_day.isoformat() if week.rest_day else None,
@@ -239,10 +268,34 @@ def generate_week(conn: sqlite3.Connection, plan: dict[str, Any], monday: date,
             "warnings": warnings}
 
 
+def _recurring_sessions(conn: sqlite3.Connection, plan: dict[str, Any], monday: date, today: date,
+                        fixed: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Feste Einheiten des Plans (z. B. Pendeln am Donnerstag) für diese Woche."""
+    raw = plan.get("recurring")
+    items = json.loads(raw) if isinstance(raw, str) and raw else (raw or [])
+    out = []
+    for r in items:
+        if r.get("day") not in WEEKDAYS:
+            continue
+        d = monday + timedelta(days=WEEKDAYS.index(r["day"]))
+        title = r.get("title")
+        if d < today or any(to_date(f["date"]) == d and f.get("title") == title for f in fixed):
+            continue
+        built = workouts.build(conn, r["sport"], r.get("intensity", "easy"), int(r["duration_min"]))
+        s = {"date": d.isoformat(), "sport": r["sport"], **built, "status": "planned", "recurring": True}
+        if title:
+            s["title"] = title
+        if r.get("description"):
+            s["description"] = r["description"] + "\n\n" + built["description"]
+        out.append(s)
+    return out
+
+
 def _sport_requests(conn: sqlite3.Connection, plan: dict[str, Any], sport: str, sport_min: float,
                     ctx: dict[str, Any], targets: dict[str, Any], baseline: dict[str, Any], key_intensity: str | None,
                     avail: dict[str, dict[str, int | None]], state: list[dict[str, Any]], monday: date,
-                    today: date, warnings: list[str]) -> list[dict[str, Any]]:
+                    today: date, warnings: list[str], recurring_count: int = 0,
+                    test_budget: dict[str, int] | None = None) -> list[dict[str, Any]]:
     """Einheiten einer Sportart: Test, lange Einheit, Schlüsseleinheit, lockere Einheiten.
 
     Häufigkeit orientiert sich an der aktuellen Gewohnheit (Einheiten/Woche der letzten Wochen), höchstens +1,
@@ -251,11 +304,21 @@ def _sport_requests(conn: sqlite3.Connection, plan: dict[str, Any], sport: str, 
     tpl = load_template(plan.get("goal_kind"))
     min_session = MIN_SESSION.get(sport, 30)
     by_volume = int(sport_min / tpl["typical_session_min"].get(sport, 50) + 0.5)
-    habit = round(baseline["by_sport"].get(sport, {}).get("sessions_per_week", 0))
+    habit = max(0, round(baseline["by_sport"].get(sport, {}).get("sessions_per_week", 0)) - recurring_count)
     n = min(by_volume, habit + 1) if habit else by_volume
     n = max(1, min(tpl["max_sessions_per_week"].get(sport, 3), len(avail.get(sport, {})), n))
     reqs: list[dict[str, Any]] = []
     protocol = _needs_test(conn, sport, monday, ctx, state, today) if sport in ENDURANCE_SPORTS else None
+    if protocol and test_budget is not None:
+        test_load = workouts.build(conn, sport, "test", 0, protocol)["target_load"]
+        first = test_budget["left"] == MAX_TESTS_PER_WEEK
+        if test_budget["left"] <= 0 or (not first and test_load > test_budget["load"]):
+            warnings.append(f"{sport}: Leistungstest folgt nächste Woche (Tests werden gestaffelt, damit der "
+                            "gewohnte Umfang nicht wegfällt)")
+            protocol = None
+        else:
+            test_budget["left"] -= 1
+            test_budget["load"] -= test_load
     if protocol:
         built = workouts.build(conn, sport, "test", 0, protocol)
         reqs.append({"sport": sport, "intensity": "test", "duration_s": built["duration_s"], "protocol": protocol})
@@ -273,11 +336,13 @@ def _sport_requests(conn: sqlite3.Connection, plan: dict[str, Any], sport: str, 
     if n >= 2 and sport in tpl.get("long_share", {}) and ctx["week_type"] != "race":
         # an der gewohnten Länge orientieren, aber höchstens die Hälfte der Wochenzeit der Sportart
         habitual = targets["recent_longest_min"].get(sport, 0) * (0.7 if recovery else 1.0)
-        long_min = min(cap, max(total * tpl["long_share"][sport], min(habitual, total * 0.5)))
+        # Gibt es feste lockere Einheiten der Sportart (Pendeln), deckt die lange Einheit den Großteil des Rests ab
+        share = 0.7 if recurring_count else tpl["long_share"][sport]
+        long_min = min(cap, max(total * share, min(habitual, total * (0.7 if recurring_count else 0.5))))
         if long_min < min_session:
             long_min = 0.0
     slots_left = n - (1 if long_min else 0)
-    if key_intensity and slots_left >= 2 and not protocol and sport in ENDURANCE_SPORTS:
+    if key_intensity and slots_left >= 1 and n + recurring_count >= 2 and not protocol and sport in ENDURANCE_SPORTS:
         status = test_status(conn, sport, monday)["status"]
         if status != "missing":
             if status == "stale":
@@ -315,32 +380,62 @@ def _sport_requests(conn: sqlite3.Connection, plan: dict[str, Any], sport: str, 
 
 
 def _fit_load(conn: sqlite3.Connection, placed: list[dict[str, Any]], targets: dict[str, Any],
-              warnings: list[str], avail: dict[str, dict[str, int | None]], fixed_load: float) -> None:
+              warnings: list[str], avail: dict[str, dict[str, int | None]], fixed_load: float,
+              fixed_hours: float = 0.0) -> None:
     """Hält die Wochenlast im Korridor: erst lockere, dann lange Einheiten anpassen."""
     corridor = targets["load_corridor"]
     ref = targets["reference"]
     def load() -> float:
         return fixed_load + sum(s["target_load"] or 0 for s in placed
                                 if s["sport"] in ENDURANCE_SPORTS and s.get("race_priority") != "A")
-    adjustable = [s for s in placed if s["intensity"] in ("easy", "recovery", "long") and s["sport"] in ENDURANCE_SPORTS]
+    adjustable = [s for s in placed if s["intensity"] in ("easy", "recovery", "long") and s["sport"] in ENDURANCE_SPORTS
+                  and not s.get("recurring")]
     for _ in range(20):
         if load() <= corridor["upper"] or not adjustable:
             break
         for s in adjustable:
             new_min = max(MIN_SESSION.get(s["sport"], 30), int(s["duration_s"] / 60 * 0.9 / 5) * 5)
             s.update(workouts.build(conn, s["sport"], s["intensity"], new_min))
+    # letztes Mittel: Qualitätseinheiten kürzen, dann lockere Einheiten streichen – nie über die Obergrenze planen
+    quality = [s for s in placed if s["intensity"] in ("tempo", "threshold", "vo2") and not s.get("recurring")]
+    for s in quality:
+        if load() <= corridor["upper"]:
+            break
+        s.update(workouts.build(conn, s["sport"], s["intensity"], max(35, int(s["duration_s"] / 60 * 0.8 / 5) * 5)))
+    for s in sorted(adjustable, key=lambda x: x["duration_s"]):
+        if load() <= corridor["upper"]:
+            break
+        placed.remove(s)
+        warnings.append(f"{s['title']} gestrichen, um im Lastkorridor zu bleiben")
     if load() > corridor["upper"] * 1.02:
         warnings.append(f"Wochenlast {load():.0f} über Korridor {corridor['upper']:.0f} trotz Kürzung")
-    if targets["context"]["week_type"] == "load" and load() < corridor["lower"]:
+    # bis zur Ziellast auffüllen (nie über die Obergrenze): sonst plant jede Woche etwas zu wenig, und weil die
+    # Folgewoche auf der geplanten Vorwoche aufbaut, sinkt der Umfang Woche für Woche
+    fill_to = min(corridor["upper"], max(corridor["lower"], targets["target_load"]) * 0.98)
+
+    def hours() -> float:
+        return fixed_hours + sum(s["duration_s"] for s in placed if s["sport"] in ENDURANCE_SPORTS) / 3600
+
+    def filled() -> bool:
+        # Ziel erreicht, sobald Stunden ODER Last passen – lockere Einheiten haben weniger Last je Stunde
+        return (load() >= fill_to or hours() >= targets["target_hours"] * 0.98) and load() >= corridor["lower"]
+
+    if targets["context"]["week_type"] != "race" and not filled():
         for _ in range(10):
-            if load() >= corridor["lower"]:
+            if filled():
                 break
             for s in adjustable:
+                if filled():
+                    break
                 cap = avail.get(s["sport"], {}).get(weekday_key(s["date"]))
                 limit = min(targets["long_session_cap_min"].get(s["sport"], 120), cap or 999)
                 new_min = min(limit, int(s["duration_s"] / 60 * 1.1 / 5) * 5 + 5)
                 if new_min > s["duration_s"] / 60:
+                    before = dict(s)
                     s.update(workouts.build(conn, s["sport"], s["intensity"], new_min))
+                    if load() > corridor["upper"]:
+                        s.clear()
+                        s.update(before)
         if load() < corridor["lower"] * 0.98:
             warnings.append(f"Wochenlast {load():.0f} unter Untergrenze {corridor['lower']:.0f} "
                             f"(Referenz {ref['load']:.0f}) – zu wenige verfügbare Tage/Zeitfenster?")

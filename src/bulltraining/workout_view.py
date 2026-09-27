@@ -62,6 +62,10 @@ def _hr_range(th: Thresholds, sport: str, z_lo: int, z_hi: int) -> str | None:
     return None
 
 
+def _pct(lo: float, hi: float) -> str:
+    return f"{lo:g} %" if lo == hi else f"{lo:g}–{hi:g} %"
+
+
 def _duration_text(dur: str) -> str:
     d = dur.lower()
     if d.endswith("mtr"):
@@ -95,10 +99,10 @@ def step_detail(th: Thresholds, sport: str, dur: str, target: str) -> dict[str, 
                 targets.append(("Leistung", f"{round(th.ftp * lo / 100)} W → {round(th.ftp * hi / 100)} W, bis zum Abbruch"))
         elif sport == "ride" or "pace" not in t:
             power = _power_range(th, lo, hi)
-            targets.append(("Leistung", power or f"{lo:g}–{hi:g} % FTP"))
+            targets.append(("Leistung", power or f"{_pct(lo, hi)} FTP"))
         else:
             pace = _pace_range(th, sport, lo, hi)
-            targets.append(("Pace", pace or f"{lo:g}–{hi:g} % der Schwellenpace"))
+            targets.append(("Pace", pace or f"{_pct(lo, hi)} der Schwellenpace"))
     elif hrz:
         z_lo = max(0, min(4, int(hrz.group(1)) - 1))
         z_hi = max(0, min(4, int(hrz.group(2) or hrz.group(1)) - 1))

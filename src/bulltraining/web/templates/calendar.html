@@ -2,17 +2,6 @@
 {% import "_macros.html" as mx with context %}
 {% block title %}Kalender{% endblock %}
 {% block content %}
-<style>
-.week { display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; }
-.day { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:6px; min-height:120px; min-width:0; }
-.day.today { border-color:var(--accent); }
-.day h4 { margin:0 0 4px; font-size:12px; color:var(--muted); font-weight:600; }
-.s { border-left:4px solid; padding:3px 6px; margin:4px 0; border-radius:4px; background:var(--bg); font-size:12px; }
-.s.done { opacity:.6; } .s.skipped { text-decoration:line-through; opacity:.5; }
-.a { font-size:12px; padding:3px 6px; margin:4px 0; border-radius:4px; border:1px dashed var(--line); }
-.a a { color:inherit; }
-@media (max-width: 800px) { .week { grid-template-columns:1fr; } .day { min-height:0; } }
-</style>
 <div class="row" style="justify-content:space-between">
   <h1>Kalender {% if plan %}<span class="muted small">· {{ plan.name }}</span>{% endif %}</h1>
   <div class="row">

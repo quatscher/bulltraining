@@ -44,12 +44,47 @@ def plan_sports(plan: dict[str, Any]) -> list[str]:
     return json.loads(sports) if isinstance(sports, str) else list(sports)
 
 
-def sport_shares(plan: dict[str, Any]) -> dict[str, float]:
+INTRO_FRACTION = 0.4  # neue Sportart startet mit 40 % ihres Spitzenumfangs laut Vorlage
+
+
+def sport_shares(plan: dict[str, Any], baseline: dict[str, Any] | None = None,
+                 total_hours: float | None = None, reduction: float | None = None) -> dict[str, float]:
+    """Anteile der Sportarten an der Wochenzeit.
+
+    Ohne Kontext: Verhältnis der Vorlage. Mit aktuellem Umfang und Wochenziel:
+    1. Was der Athlet schon macht, bleibt als Untergrenze – höchstens bis zum Spitzenumfang, den der Plan für die
+       Sportart vorsieht (Vorlagenanteil × Zielstunden). Ein Läufer läuft also weiter, statt auf den Vorlagenanteil
+       gekürzt zu werden, solange der Gesamtumfang noch klein ist.
+    2. Neue Sportarten starten mit INTRO_FRACTION ihres Spitzenumfangs.
+    3. Weitere Zeit geht an die Sportarten, die am weitesten unter ihrem Vorlagenanteil liegen.
+    In Entlastungs- und Taperwochen (`reduction` = Anteil der Referenzwoche) schrumpfen alle Untergrenzen im
+    selben Verhältnis.
+    """
     tpl = load_template(plan.get("goal_kind"))
     sports = [s for s in plan_sports(plan) if s in ENDURANCE_SPORTS or s == "other"]
     raw = {s: tpl["sports"].get(s, 1.0 / max(1, len(sports))) for s in sports}
-    total = sum(raw.values()) or 1.0
-    return {s: v / total for s, v in raw.items()}
+    norm = sum(raw.values()) or 1.0
+    target = {s: v / norm for s, v in raw.items()}
+    if not baseline or not total_hours:
+        return target
+    ceiling = float(plan.get("weekly_hours") or total_hours)
+    cur = {s: float(baseline.get("by_sport", {}).get(s, {}).get("hours_per_week") or 0) for s in sports}
+    if sum(cur.values()) <= 0:
+        return target
+    floor = {s: min(cur[s], target[s] * ceiling) if cur[s] > 0 else INTRO_FRACTION * target[s] * ceiling
+             for s in sports}
+    f = min(1.0, total_hours / (sum(floor.values()) or 1.0))
+    if reduction is not None:
+        f = min(f, reduction)  # Entlastung/Taper: jede Sportart anteilig reduzieren, nicht nur die "Überschüsse"
+    alloc = {s: v * f for s, v in floor.items()}
+    rest = total_hours - sum(alloc.values())
+    if rest > 1e-6:
+        deficit = {s: max(0.0, target[s] * total_hours - alloc[s]) for s in sports}
+        weights = deficit if sum(deficit.values()) > 0 else target
+        wsum = sum(weights.values()) or 1.0
+        for s in sports:
+            alloc[s] += rest * weights[s] / wsum
+    return {s: alloc[s] / total_hours for s in sports}
 
 
 def week_context(plan: dict[str, Any], monday: date) -> dict[str, Any]:
@@ -103,7 +138,7 @@ def week_effective(conn: sqlite3.Connection, monday: date, sessions: list[dict[s
     plan_load = plan_h = 0.0
     for s in sessions:
         d = to_date(s["date"])
-        if monday <= d <= sunday and d >= today and s.get("status") not in ("deleted", "skipped", "done") \
+        if monday <= d <= sunday and d >= today and s.get("status") not in ("deleted", "skipped") \
                 and s["sport"] in ENDURANCE_SPORTS:
             plan_load += float(s.get("target_load") or 0)
             plan_h += s["duration_s"] / 3600
@@ -120,6 +155,12 @@ def reference_week(conn: sqlite3.Connection, plan: dict[str, Any], monday: date,
     """
     weeks = int(baseline.get("weeks") or 4)
     effs = [week_effective(conn, monday - timedelta(weeks=k), sessions, today) for k in range(1, weeks + 1)]
+    if baseline.get("data_quality") == "manual" and baseline.get("manual_as_of"):
+        # Wochen vor der Selbstauskunft ohne Daten zählen mit dem angegebenen Umfang
+        manual_until = to_date(baseline["manual_as_of"])
+        for k, e in enumerate(effs, start=1):
+            if e["load"] == 0 and monday - timedelta(weeks=k) + timedelta(days=6) <= manual_until:
+                effs[k - 1] = {**e, "load": baseline["avg_endurance_load"], "hours": baseline["avg_endurance_hours"]}
     chronic_load = sum(e["load"] for e in effs) / weeks
     chronic_hours = sum(e["hours"] for e in effs) / weeks
     if chronic_load <= 0:
@@ -140,6 +181,7 @@ def reference_week(conn: sqlite3.Connection, plan: dict[str, Any], monday: date,
                        else f"Schnitt der {weeks} Wochen vor {monday.isoformat()}")}
 
 
+PHASE_CEILING = {"base": 0.8, "build": 0.95, "specific": 1.0, "taper": 1.0, "continuous": 1.0, "pre": 0.8}
 PHASE_INTENSITY = {"base": 1.0, "build": 1.05, "specific": 1.05, "continuous": 1.0, "taper": 0.95, "pre": 1.0}
 
 
@@ -155,7 +197,8 @@ def week_targets(conn: sqlite3.Connection, plan: dict[str, Any], monday: date,
     ref = reference_week(conn, plan, monday, sessions, today, baseline)
     inc = get_float(conn, "max_weekly_load_increase_pct", 10) / 100
     rec = get_float(conn, "recovery_week_pct", 65) / 100
-    ceiling = float(plan.get("weekly_hours") or ref["hours"] or 5)
+    # Spitzenumfang erst in der wettkampfspezifischen Phase; Grundlage und Aufbau bleiben darunter
+    ceiling = float(plan.get("weekly_hours") or ref["hours"] or 5) * PHASE_CEILING.get(ctx["phase"], 1.0)
     wt = ctx["week_type"]
     notes = []
     if wt == "recovery":
@@ -163,7 +206,7 @@ def week_targets(conn: sqlite3.Connection, plan: dict[str, Any], monday: date,
     elif wt == "taper":
         hours = ref["hours"] * (0.75 if ctx["weeks_to_goal"] >= 2 else 0.6)
     elif wt == "race":
-        hours = ref["hours"] * 0.45
+        hours = ref["hours"] * 0.35  # ohne das Rennen selbst
     elif ref["hours"] <= ceiling:
         # nach einer Entlastungswoche auf dem Niveau der letzten Belastungswoche wieder einsteigen
         step = inc / 2 if ref.get("after_recovery") else inc

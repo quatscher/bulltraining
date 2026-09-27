@@ -35,6 +35,7 @@ def _script_json(value: Any) -> Markup:
 
 
 templates.env.filters["tojson_safe"] = _script_json
+templates.env.filters["weekday_index"] = lambda s: date.fromisoformat(str(s)[:10]).weekday()
 _conn = None
 
 SPORT_COLOR = {"run": "#e0703a", "ride": "#3a7be0", "swim": "#2bb3a8", "strength": "#8a63d2", "other": "#888"}
@@ -210,13 +211,85 @@ def inbox(request: Request) -> HTMLResponse:
                             "WHERE ps.status IN ('planned','deleted') AND ps.date >= ?", (date.today().isoformat(),)).fetchone()["n"]
     pending = plans.list_changes(c, "pending")
     th = Thresholds(c)
+    paces = reference_paces(c)
     for ch in pending:
-        for a in ch["diff"]["after"]:
-            if not a.get("_deleted"):
-                a["steps"] = workout_steps(th, a["sport"], a.get("description"))
+        ch["weeks"] = _proposal_weeks(c, ch, th, paces)
     return render(request, "inbox.html", pending=pending,
                   log=[x for x in plans.list_changes(c, limit=30) if x["status"] != "pending"],
                   pairs=duplicates.open_pairs(c), runs=runs, publish_errors=errors, unpublished=unpublished)
+
+
+ENDURANCE = ("run", "ride", "swim")
+
+
+def _change_note(b: dict[str, Any], a: dict[str, Any]) -> str:
+    parts = []
+    if a["date"] != b["date"]:
+        parts.append(f"von {WEEKDAY_DE[date.fromisoformat(b['date']).weekday()]} {b['date'][8:10]}.{b['date'][5:7]}.")
+    if a["duration_s"] != b["duration_s"]:
+        parts.append(f"{b['duration_s'] // 60} → {a['duration_s'] // 60} min")
+    if a.get("intensity") != b.get("intensity"):
+        parts.append(f"{b.get('intensity')} → {a.get('intensity')}")
+    return ", ".join(parts) or "Beschreibung geändert"
+
+
+def _proposal_weeks(c: Any, ch: dict[str, Any], th: Thresholds, paces: dict[str, Any]) -> list[dict[str, Any]]:
+    """Wochenraster eines offenen Vorschlags: aktueller Plan mit markierten Änderungen (neu/geändert/entfällt)."""
+    diff = ch["diff"]
+    before = {b["id"]: b for b in diff["before"]}
+    dates = [date.fromisoformat(x["date"]) for x in diff["before"] + diff["after"] if x.get("date")]
+    plan = plans.get_plan_by_id(c, ch["plan_id"]) if ch.get("plan_id") else None
+    weeks = []
+    n = 0
+    for m in sorted({monday_of(d) for d in dates}):
+        sunday = m + timedelta(days=6)
+        entries: list[dict[str, Any]] = []
+        after_by_id = {a["id"]: a for a in diff["after"]}
+        current = plans.get_sessions(c, ch["plan_id"], m, sunday)
+        for s in current:
+            a = after_by_id.get(s["id"])
+            if a is None:
+                entries.append({"s": s, "mark": "same"})
+            elif a.get("_deleted"):
+                entries.append({"s": s, "mark": "removed", "note": "entfällt"})
+            elif a["date"] != s["date"]:
+                entries.append({"s": s, "mark": "removed",
+                                "note": f"verschoben auf {WEEKDAY_DE[date.fromisoformat(a['date']).weekday()]}"})
+        for a in diff["after"]:
+            if a.get("_deleted") or not (m <= date.fromisoformat(a["date"]) <= sunday):
+                continue
+            b = before.get(a["id"])
+            if b is None:
+                entries.append({"s": a, "mark": "new", "note": "neu"})
+            else:
+                entries.append({"s": a, "mark": "changed", "note": _change_note(b, a)})
+        for e in entries:
+            s = e["s"]
+            n += 1
+            e["anchor"] = f"pc{ch['id']}-{n}"
+            e["zones"] = session_zone_secs(s, paces) if s["sport"] in ENDURANCE else None
+            e["steps"] = workout_steps(th, s["sport"], s.get("description")) if e["mark"] != "removed" else None
+        def endu(sel):
+            items = [e["s"] for e in entries if sel(e) and e["s"]["sport"] in ENDURANCE]
+            return round(sum(x["duration_s"] for x in items) / 3600, 1), round(sum(x.get("target_load") or 0 for x in items))
+        # vorher = aktueller Plan dieser Woche, nachher = mit angewendetem Vorschlag
+        cur_endu = [s for s in current if s["sport"] in ENDURANCE]
+        before_h = round(sum(s["duration_s"] for s in cur_endu) / 3600, 1)
+        before_l = round(sum(s.get("target_load") or 0 for s in cur_endu))
+        after_h, after_l = endu(lambda e: e["mark"] != "removed")
+        days = []
+        for d in week_days(m):
+            day_entries = [e for e in entries if e["s"]["date"] == d.isoformat()]
+            day_entries.sort(key=lambda e: (e["mark"] == "removed", e["s"]["sport"]))
+            days.append({"date": d, "entries": day_entries})
+        info = None
+        if plan:
+            ctx = week_context(plan, m)
+            corridor = week_targets(c, plan, m)["load_corridor"] if m >= monday_of(date.today()) else None
+            info = {"ctx": ctx, "corridor": corridor}
+        weeks.append({"monday": m, "iso": iso_week(m), "days": days, "entries": entries, "info": info,
+                      "before_h": before_h, "before_l": before_l, "after_h": after_h, "after_l": after_l})
+    return weeks
 
 
 @app.post("/changes/{change_id}/apply")

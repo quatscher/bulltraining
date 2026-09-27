@@ -8,7 +8,7 @@ from typing import Any
 
 import pandas as pd
 
-from .db import get_float
+from .db import get_float, get_setting
 from .util import ENDURANCE_SPORTS, monday_of, parse_week, to_date, week_days
 from .zonemodel import ZONES, activity_zone_secs, reference_paces, session_zone_secs
 
@@ -297,6 +297,9 @@ def training_baseline(conn: sqlite3.Connection, as_of: date | None = None, weeks
         quality = "sparse"
     else:
         quality = "ok"
+    manual = manual_baseline(conn)
+    if quality != "ok" and manual:
+        return _baseline_from_manual(manual, as_of, weeks, state)
     return {
         "as_of": as_of.isoformat(), "weeks": weeks, "window": [start.isoformat(), (this_monday - timedelta(days=1)).isoformat()],
         "data_quality": quality,
@@ -316,6 +319,48 @@ def training_baseline(conn: sqlite3.Connection, as_of: date | None = None, weeks
 
 
 ACWR_MAX = 1.3
+
+
+def manual_baseline(conn: sqlite3.Connection) -> dict[str, Any] | None:
+    """Selbstauskunft zum aktuellen Umfang (settings.manual_baseline), z. B. nach längerer Sync-Pause."""
+    raw = get_setting(conn, "manual_baseline")
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return None
+
+
+def _baseline_from_manual(m: dict[str, Any], as_of: date, weeks: int, state: dict[str, Any]) -> dict[str, Any]:
+    lph = float(m.get("load_per_hour") or 50)
+    by_sport = {}
+    for sport, v in (m.get("sports") or {}).items():
+        hours = float(v.get("hours_per_week") or 0)
+        if not hours and v.get("minutes") and v.get("sessions_per_week"):
+            hours = float(v["minutes"]) * float(v["sessions_per_week"]) / 60
+        by_sport[sport] = {"hours_per_week": round(hours, 2),
+                           "sessions_per_week": float(v.get("sessions_per_week") or 0),
+                           "longest_min": int(v.get("longest_min") or 0),
+                           "load_per_week": round(hours * lph, 1) if sport in ENDURANCE_SPORTS else None}
+    endu_h = sum(v["hours_per_week"] for s, v in by_sport.items() if s in ENDURANCE_SPORTS)
+    load = endu_h * lph
+    return {
+        "as_of": as_of.isoformat(), "weeks": weeks, "window": None, "data_quality": "manual",
+        "manual_as_of": m.get("as_of"),
+        "avg_endurance_hours": round(endu_h, 2), "avg_endurance_load": round(load, 1),
+        "max_week_endurance_hours": round(endu_h, 2), "max_week_endurance_load": round(load, 1),
+        "load_per_hour": lph,
+        "strength_sessions_per_week": by_sport.get("strength", {}).get("sessions_per_week", 0.0),
+        "longest_min_by_sport": {s: v["longest_min"] for s, v in by_sport.items() if s in ENDURANCE_SPORTS},
+        "by_sport": by_sport,
+        "weekly": [{"week": "Selbstauskunft", "endurance_hours": round(endu_h, 2), "total_hours": round(endu_h, 2),
+                    "endurance_load": round(load, 1), "total_load": round(load, 1), "sessions": 0}] * weeks,
+        "acwr_last_week": None,
+        # ohne Historie: CTL als Tagesmittel der gewohnten Wochenlast schätzen
+        "ctl_endurance": state["ctl_endurance"] or round(load / 7, 1),
+        "form_endurance": state["form_endurance"],
+    }
 
 
 def load_corridor(conn: sqlite3.Connection, reference_load: float, ctl: float | None,

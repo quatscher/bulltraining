@@ -8,7 +8,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
-from .db import get_float
+from .db import get_float, get_setting
 from .performance import PROTOCOLS, test_status
 from .util import fmt_pace
 
@@ -79,13 +79,18 @@ def build(conn: sqlite3.Connection, sport: str, intensity: str, duration_min: in
     if intensity == "test":
         spec = PROTOCOLS[protocol]
         return {"title": spec["name"], "description": spec["summary"] + "\n\n" + spec["description"],
-                "duration_s": spec["duration_min"] * 60, "target_load": estimate_load(spec["duration_min"], "test"),
+                "duration_s": spec["duration_min"] * 60,
+                "target_load": round(spec["duration_min"] / 60 * spec.get("load_if", IF["test"]) ** 2 * 100, 1),
                 "intensity": "test", "category": "TEST", "test_protocol": protocol}
     if sport not in PCT:
         rpe = {"recovery": 4, "easy": 5, "long": 6, "tempo": 7}.get(intensity, 7)
+        if sport == "strength":
+            rpe = 5 if intensity == "recovery" else 7  # schwere Grundübungen mit langen Pausen
         factor = get_float(conn, "srpe_factor", 1.0)
+        custom = get_setting(conn, "strength_description") if sport == "strength" else None
         return {"title": f"{SPORT_LABEL.get(sport, sport)} {duration_min} min",
-                "description": f"{SPORT_LABEL.get(sport, sport)}, Ziel-RPE {rpe}. Nach der Einheit RPE melden.",
+                "description": (custom + "\n\n" if custom else "")
+                + f"{SPORT_LABEL.get(sport, sport)}, Ziel-RPE {rpe}. Nach der Einheit RPE melden.",
                 "duration_s": duration_min * 60, "target_load": round(rpe * duration_min * factor, 1),
                 "intensity": intensity, "category": "WORKOUT", "test_protocol": None}
 
@@ -109,6 +114,21 @@ def build(conn: sqlite3.Connection, sport: str, intensity: str, duration_min: in
         if filler > 0:
             lines += [t.step(filler, "easy"), ""]
         lines += ["Ausklang", t.step(cd, "rest")]
+    elif sport == "swim" and intensity in ("easy", "long", "recovery") and duration_min >= 30:
+        # Schwimmen ist bei den meisten Triathleten Technik-limitiert: jede lockere Einheit mit Technikblock
+        reps = 6 if duration_min >= 40 else 4
+        wu, cd = 10, 5
+        main = duration_min - wu - cd - int(reps * 2.5)
+        zone = intensity if intensity in PCT[sport] else "easy"
+        title = f"Schwimmen Technik + {INTENSITY_LABEL.get(intensity, intensity)} {duration_min} min"
+        note = t.note(zone)
+        lines += ["Einschwimmen", t.step(wu, "wu"), "",
+                  "Technik: Drills im Wechsel – Abschlagschwimmen, Faustschwimmen, Züge pro Bahn zählen",
+                  f"{reps}x", t.step(2, "recovery"), "- 30s rest", ""]
+        if note:
+            lines.append(note)
+        lines += ["Grundlage: lang gleiten, Wasserlage halten, unter Wasser ausatmen", t.step(main, zone), "",
+                  "Ausschwimmen", t.step(cd, "rest")]
     else:
         zone = intensity if intensity in PCT[sport] else "easy"
         if intensity in WORK_REST[sport]:  # kurze harte Einheit ohne Platz für Struktur -> Tempo-Dauer

@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS plans (
   priority      TEXT,
   weekly_hours  REAL,
   available_days TEXT,
+  recurring     TEXT,                 -- JSON: feste Einheiten je Woche, z. B. Pendeln
   start_date    TEXT NOT NULL,
   baseline      TEXT,                 -- JSON: Trainingsumfang und Tests bei Planerstellung
   status        TEXT NOT NULL CHECK (status IN ('active','archived')),
@@ -165,8 +166,19 @@ def connect(path: Path | str | None = None) -> sqlite3.Connection:
 
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    _migrate(conn)
     for key, value in config.DEFAULT_SETTINGS.items():
         conn.execute("INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)", (key, value))
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Spalten, die nach der ersten Version dazugekommen sind, in bestehenden DBs ergänzen."""
+    added = {"plans": {"recurring": "TEXT"}}
+    for table, cols in added.items():
+        have = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for col, typ in cols.items():
+            if col not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
 
 
 _SAVEPOINTS = itertools.count(1)

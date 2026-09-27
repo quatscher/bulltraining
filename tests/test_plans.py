@@ -35,8 +35,14 @@ def test_missing_tests_are_scheduled_first_without_hard_sessions(conn):
     plan = _plan(conn)
     g = generator.generate_week(conn, plan, MONDAY, [], TODAY)
     tests = {s["sport"] for s in g["sessions"] if s["category"] == "TEST"}
-    assert tests == {"swim", "ride", "run"}
+    assert "ride" in tests and len(tests) <= 2  # größte Sportart zuerst, gestaffelt
+    assert any("folgt nächste Woche" in w for w in g["warnings"])
     assert not [s for s in g["sessions"] if s["intensity"] in ("threshold", "vo2")]
+    state = list(g["sessions"])
+    for k in (1, 2):  # spätestens nach drei Wochen sind alle Tests eingeplant
+        nxt = generator.generate_week(conn, plan, MONDAY + timedelta(weeks=k), state, TODAY)
+        state += nxt["sessions"]
+    assert {s["sport"] for s in state if s["category"] == "TEST"} == {"swim", "ride", "run"}
 
 
 def test_generated_week_stays_in_corridor_and_follows_rules(conn):

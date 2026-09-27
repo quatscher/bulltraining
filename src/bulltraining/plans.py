@@ -33,12 +33,12 @@ class PlanError(ValueError):
 
 def get_active_plan(conn: sqlite3.Connection) -> dict[str, Any] | None:
     return row_to_dict(conn.execute("SELECT * FROM plans WHERE status = 'active' ORDER BY id DESC LIMIT 1").fetchone(),
-                       ("sports", "available_days", "baseline"))
+                       ("sports", "available_days", "baseline", "recurring"))
 
 
 def get_plan_by_id(conn: sqlite3.Connection, plan_id: int) -> dict[str, Any] | None:
     return row_to_dict(conn.execute("SELECT * FROM plans WHERE id = ?", (plan_id,)).fetchone(),
-                       ("sports", "available_days", "baseline"))
+                       ("sports", "available_days", "baseline", "recurring"))
 
 
 def list_plans(conn: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -49,7 +49,7 @@ def create_plan(conn: sqlite3.Connection, *, name: str, goal_type: str, sports: 
                 weekly_hours: float, goal_date: str | None = None, goal_kind: str | None = None,
                 focus: str | None = None, priority: str | None = None,
                 available_days: dict[str, Any] | None = None, start_date: str | None = None,
-                today: date | None = None) -> dict[str, Any]:
+                recurring: list[dict[str, Any]] | None = None, today: date | None = None) -> dict[str, Any]:
     today = today or date.today()
     if goal_type not in ("event", "continuous"):
         raise PlanError("goal_type muss 'event' oder 'continuous' sein.")
@@ -78,10 +78,12 @@ def create_plan(conn: sqlite3.Connection, *, name: str, goal_type: str, sports: 
         conn.execute("UPDATE plans SET status = 'archived' WHERE status = 'active'")
         cur = conn.execute(
             "INSERT INTO plans(name, goal_type, goal_date, goal_kind, sports, focus, priority, weekly_hours, "
-            "available_days, start_date, baseline, status, created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?, 'active', ?)",
+            "available_days, recurring, start_date, baseline, status, created_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'active', ?)",
             (name, goal_type, goal_date, goal_kind, json.dumps(sports), focus,
              (priority or "A") if goal_type == "event" else None, weekly_hours,
-             json.dumps(available_days) if available_days else None, start.isoformat(),
+             json.dumps(available_days) if available_days else None,
+             json.dumps(recurring, ensure_ascii=False) if recurring else None, start.isoformat(),
              json.dumps(snapshot), now_iso()))
     plan = get_plan_by_id(conn, cur.lastrowid)
     return {"plan": plan, "readiness": plan_readiness(conn, plan, today)}
@@ -104,7 +106,9 @@ def plan_readiness(conn: sqlite3.Connection, plan: dict[str, Any], today: date |
         notes.append("Erste Planwoche enthält Leistungstests für: " + ", ".join(
             f"{s} ({PROTOCOLS[tests[s]['protocol'] or DEFAULT_PROTOCOL[s]]['name']})" for s in missing)
             + ". Harte Einheiten dieser Sportarten folgen erst nach dem Test.")
-    if baseline["data_quality"] != "ok":
+    if baseline["data_quality"] == "manual":
+        notes.append("Ausgangsumfang aus Selbstauskunft – sobald Aktivitäten synchronisiert sind, zählen die echten Daten.")
+    elif baseline["data_quality"] != "ok":
         notes.append("Wenig Trainingsdaten in den letzten Wochen – Start konservativ. Vorher synchronisieren.")
     current = baseline["avg_endurance_hours"]
     target = float(plan.get("weekly_hours") or 0)

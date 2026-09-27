@@ -15,6 +15,22 @@ $env:INTERVALS_API_KEY = "…"          # intervals.icu/settings -> Developer Se
 
 Ohne API-Key ausprobieren: `bulltraining demo` legt 16 Wochen synthetisches Training, drei Tests und einen 70.3-Plan an (Schwimmen bewusst ohne Test). Mit `$env:BULLTRAINING_DB = "data\demo.db"` bleibt die Demo von der echten DB getrennt.
 
+## Ohne Trainingshistorie starten
+
+Liegen (noch) keine synchronisierten Aktivitäten vor, nimmt der Plan den Ausgangsumfang aus der Einstellung
+`manual_baseline` (Selbstauskunft), bis echte Daten da sind:
+
+```json
+{"as_of": "2026-09-27", "load_per_hour": 50,
+ "sports": {"run": {"hours_per_week": 3.4, "sessions_per_week": 3.5, "longest_min": 120},
+            "ride": {"hours_per_week": 2.0, "sessions_per_week": 2, "longest_min": 60},
+            "strength": {"sessions_per_week": 2, "minutes": 50}}}
+```
+
+Feste Einheiten (z. B. Pendeln) stehen je Plan in `plans.recurring` und werden in jede Woche eingeplant; sie zählen
+zur Last und zum Anteil ihrer Sportart. Inhalt und Dauer der Krafteinheiten kommen aus `strength_description` und
+`strength_minutes`.
+
 ## Ablauf
 
 1. **Sync** (`bulltraining sync`, per Aufgabenplanung/Cron, oder Button im Posteingang): Aktivitäten und Wellness spiegeln, Dubletten markieren, geplante Einheiten mit absolvierten abgleichen.
