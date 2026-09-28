@@ -535,9 +535,17 @@ def settings_intervals_test() -> RedirectResponse:
             wellness = client.wellness((date.today() - timedelta(days=30)).isoformat(), date.today().isoformat())
     except (IntervalsError, Exception) as exc:  # noqa: BLE001
         return back("/settings", err=f"Verbindung fehlgeschlagen: {exc}")
+    # „0“ bedeutet bei intervals.icu „Inhaber des Keys“ – die echte ID merken, damit sie sichtbar ist
+    from ..intervals_client import effective_athlete_id
+    real_id = str(a.get("id") or "")
+    if effective_athlete_id() in ("", "0") and real_id:
+        try:
+            set_setting(conn(), "intervals_athlete_id", real_id)
+        except SettingError:
+            pass
     newest = max((x.get("start_date_local") or "" for x in recent), default="")
     garmin = "Garmin verbunden" if a.get("icu_garmin_sync_activities") else "Garmin-Aktivitäten nicht aktiviert"
-    msg = (f"Verbunden mit {a.get('name') or a.get('id')}. {garmin}. Aktivitäten im letzten Jahr: {len(recent)}"
+    msg = (f"Verbunden mit {a.get('name') or real_id} ({real_id}). {garmin}. Aktivitäten im letzten Jahr: {len(recent)}"
            f"{', neueste ' + newest[:10] if newest else ''}. Wellness-Tage (30 Tage): {len(wellness)}.")
     if not recent:
         return back("/settings", err=msg + " Keine Aktivitäten: in intervals.icu die Garmin-Verbindung prüfen "

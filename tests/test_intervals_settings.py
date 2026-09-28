@@ -65,7 +65,7 @@ class _FakeClient:
         return False
 
     def athlete(self):
-        return {"name": "quatscher", "icu_garmin_sync_activities": True}
+        return {"id": "i727740", "name": "quatscher", "icu_garmin_sync_activities": True}
 
     def activities(self, *a):
         return self._acts
@@ -80,6 +80,7 @@ def test_connection_test_reports_empty_account(web, monkeypatch):
     monkeypatch.setattr(app_module, "IntervalsClient", lambda: _FakeClient([]))
     loc = client.post("/settings/intervals/test", follow_redirects=False).headers["location"]
     assert "err=" in loc and "Garmin" in loc
+    assert get_setting(_, "intervals_athlete_id") == "i727740"  # „0“ durch die echte ID ersetzt
     monkeypatch.setattr(app_module, "IntervalsClient",
                         lambda: _FakeClient([{"start_date_local": "2026-09-29T07:00:00"}]))
     loc = client.post("/settings/intervals/test", follow_redirects=False).headers["location"]

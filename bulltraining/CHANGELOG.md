@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+
+- "Test connection" replaces athlete ID `0` (owner of the key) with the real ID, e.g. `i123456`
+
 ## 0.3.1
 
 - intervals.icu API key and athlete ID can be managed on the settings page (masked, applied without restart);
