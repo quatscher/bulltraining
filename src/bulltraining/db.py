@@ -149,6 +149,33 @@ CREATE TABLE IF NOT EXISTS settings (
   key           TEXT PRIMARY KEY,
   value         TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS bikes (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT NOT NULL,
+  kind          TEXT NOT NULL DEFAULT '',
+  archived      INTEGER NOT NULL DEFAULT 0,
+  created_at    TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS bike_setups (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  bike_id       INTEGER NOT NULL REFERENCES bikes(id),
+  valid_from    TEXT NOT NULL,
+  values_json   TEXT NOT NULL,
+  note          TEXT,
+  created_at    TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_bike_setups ON bike_setups(bike_id, valid_from);
+
+CREATE TABLE IF NOT EXISTS bike_photos (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  bike_id       INTEGER NOT NULL REFERENCES bikes(id),
+  caption       TEXT,
+  mime          TEXT NOT NULL,
+  data          BLOB NOT NULL,
+  created_at    TEXT NOT NULL
+);
 """
 
 

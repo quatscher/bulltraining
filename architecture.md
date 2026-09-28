@@ -276,6 +276,7 @@ Grob geschnitten, nicht fein. Der Engpass ist das Kontextfenster, nicht die API:
 | `get_wellness_trend(days)` | lesend | HRV, Ruhepuls, Schlaf als Reihe plus Baseline |
 | `get_plan(from, to)` | lesend | geplante Einheiten mit Status |
 | `get_activity(id)` | lesend | eine Aktivität im Detail, für den Einzelfall |
+| `get_bike_setup()` | lesend | Räder mit aktuellem Sitz-/Cockpit-Setup und den letzten Änderungen |
 | `log_activity(...)` | schreibend, lokal | eingefügte Zeile zur Kontrolle |
 | `update_activity(id, ...)` | schreibend, lokal | geänderte Zeile |
 | `propose_plan_change(ops, reason)` | schreibend, Vorschlag | Diff-Objekt, unbestätigt |

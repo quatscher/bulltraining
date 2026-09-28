@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0
+
+- New page *Rad*: bike fit setup per bike (saddle, cockpit, pads, extensions, custom fields) with dated versions,
+  change history and photos; MCP tool `get_bike_setup`
+
 ## 0.3.2
 
 - "Test connection" replaces athlete ID `0` (owner of the key) with the real ID, e.g. `i123456`

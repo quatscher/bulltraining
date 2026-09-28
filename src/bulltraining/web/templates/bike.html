@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Rad{% endblock %}
+{% block content %}
+<h1>Rad-Setup</h1>
+{% for b in bikes %}
+<div class="card">
+  <div class="row" style="justify-content:space-between">
+    <div><h2 style="margin:0">{{ b.name }}</h2>
+      <div class="small muted">{{ b.kind or 'Rad' }}{% if b.setup %} · Setup seit {{ b.setup.valid_from }}{% else %} · noch kein Setup{% endif %}</div></div>
+    <form class="inline" method="post" action="{{ root }}/bike/{{ b.id }}/archive" onsubmit="return confirm('Rad archivieren?')"><button>Archivieren</button></form>
+  </div>
+
+  {% set vals = b.setup['values'] if b.setup else {} %}
+  <form method="post" action="{{ root }}/bike/{{ b.id }}/setup">
+    <table>
+      {% for key, lbl, hint in fields %}
+      <tr><td style="width:190px"><label for="f{{ b.id }}{{ key }}" style="margin:0;color:var(--fg)">{{ lbl }}</label></td>
+        <td><input id="f{{ b.id }}{{ key }}" name="f__{{ key }}" value="{{ vals.get(key, '') }}" placeholder="{{ hint }}" style="width:100%;max-width:520px"></td></tr>
+      {% endfor %}
+      {% for k, v in b.extra.items() %}
+      <tr><td><input name="extra_name" value="{{ k }}" style="width:180px"></td><td><input name="extra_value" value="{{ v }}" style="width:100%;max-width:520px"></td></tr>
+      {% endfor %}
+      {% for i in range(2) %}
+      <tr><td><input name="extra_name" placeholder="weiteres Feld" style="width:180px"></td><td><input name="extra_value" placeholder="Wert" style="width:100%;max-width:520px"></td></tr>
+      {% endfor %}
+    </table>
+    <div class="row">
+      <div><label>Gültig ab</label><input type="date" name="valid_from" value="{{ today.isoformat() }}"></div>
+      <div style="flex:1"><label>Notiz zur Änderung (warum, wie fühlt es sich an)</label><input name="note" style="width:100%"></div>
+      <button class="primary">Als neue Version speichern</button>
+    </div>
+    <p class="small muted">Feld leeren = Eintrag entfernen. Ohne Änderung wird keine Version angelegt.</p>
+  </form>
+
+  <h3>Fotos</h3>
+  <div class="row" style="align-items:start">
+    {% for p in b.photos %}
+    <figure style="margin:0;width:180px">
+      <a href="{{ root }}/bike/photo/{{ p.id }}" target="_blank"><img src="{{ root }}/bike/photo/{{ p.id }}" alt="{{ p.caption }}" loading="lazy" style="width:180px;height:135px;object-fit:cover;border-radius:6px;border:1px solid var(--line)"></a>
+      <figcaption class="small">{{ p.caption or '–' }}
+        <form class="inline" method="post" action="{{ root }}/bike/photo/{{ p.id }}/delete" onsubmit="return confirm('Foto löschen?')"><button class="small" title="löschen">×</button></form></figcaption>
+    </figure>
+    {% else %}<span class="small muted">noch keine</span>{% endfor %}
+  </div>
+  <form method="post" action="{{ root }}/bike/{{ b.id }}/photo" enctype="multipart/form-data" class="row">
+    <div><label>Foto (max. 8 MB)</label><input type="file" name="photo" accept="image/*" required></div>
+    <div><label>Beschriftung</label><input name="caption" placeholder="z. B. Sattelklemmung"></div>
+    <button>Hochladen</button>
+  </form>
+
+  {% if b.history|length > 1 or (b.history and b.history[0].note) %}
+  <h3>Verlauf</h3>
+  <table>
+    <tr><th>ab</th><th>Änderungen</th><th>Notiz</th></tr>
+    {% for h in b.history %}
+    <tr><td>{{ h.valid_from }}</td>
+      <td class="small">{% if loop.last %}Ausgangs-Setup{% else %}{% for ch in h.changes %}<div><b>{{ ch.field }}</b>: {{ ch.old or '–' }} → {{ ch.new or '–' }}</div>{% else %}–{% endfor %}{% endif %}</td>
+      <td class="small">{{ h.note }}</td></tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+</div>
+{% endfor %}
+
+<form class="card row" method="post" action="{{ root }}/bike">
+  <div><label>Neues Rad</label><input name="name" required placeholder="z. B. Canyon Speedmax"></div>
+  <div><label>Art</label><select name="kind"><option>Zeitfahrrad</option><option>Rennrad</option><option>Pendelrad</option><option>Gravel</option><option>Smarttrainer</option></select></div>
+  <button class="primary">Anlegen</button>
+</form>
+{% endblock %}

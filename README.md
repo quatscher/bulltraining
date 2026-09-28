@@ -54,7 +54,7 @@ Claude Desktop via stdio:
 ```
 
 MCP tools: `get_form_state`, `get_performance_state`, `get_training_load_context`, `get_week_summary`,
-`get_zone_distribution`, `get_wellness_trend`, `get_plan`, `get_session`, `get_activity`, `get_pending_changes`,
+`get_zone_distribution`, `get_wellness_trend`, `get_plan`, `get_session`, `get_activity`, `get_bike_setup`, `get_pending_changes`,
 `log_activity`, `update_activity`, `record_performance_test`, `propose_plan_change`.
 
 ## Development

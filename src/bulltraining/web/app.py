@@ -9,12 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 
-from .. import activities, config, duplicates, metrics, performance, plans
+from .. import activities, bikes, config, duplicates, metrics, performance, plans
 from ..db import SettingError, all_settings, set_setting, thread_connection, transaction, validate_setting
 from ..intervals_client import IntervalsClient, IntervalsError
 from ..periodization import available_templates, week_context, week_targets, weekly_series
@@ -551,6 +551,79 @@ def settings_intervals_test() -> RedirectResponse:
         return back("/settings", err=msg + " Keine Aktivitäten: in intervals.icu die Garmin-Verbindung prüfen "
                                            "bzw. neu verbinden.")
     return back("/settings", msg=msg)
+
+
+# --- Rad-Setup ------------------------------------------------------------------------
+
+@app.get("/bike", response_class=HTMLResponse)
+def bike_view(request: Request) -> HTMLResponse:
+    c = conn()
+    items = bikes.list_bikes(c)
+    for b in items:
+        b["history"] = bikes.setup_history(c, b["id"])
+        vals = (b["setup"] or {}).get("values", {})
+        b["extra"] = {k: v for k, v in vals.items() if k not in bikes.FIELD_KEYS}
+    return render(request, "bike.html", bikes=items, fields=bikes.SETUP_FIELDS)
+
+
+@app.post("/bike")
+async def bike_create(request: Request) -> RedirectResponse:
+    form = await request.form()
+    try:
+        bikes.create_bike(conn(), str(form.get("name") or ""), str(form.get("kind") or ""))
+    except bikes.BikeError as exc:
+        return back("/bike", err=str(exc))
+    return back("/bike", msg="Rad angelegt.")
+
+
+@app.post("/bike/{bike_id}/setup")
+async def bike_setup_save(request: Request, bike_id: int) -> RedirectResponse:
+    form = await request.form()
+    values = {k: form.get(f"f__{k}") for k in bikes.FIELD_KEYS}
+    for name, val in zip(form.getlist("extra_name"), form.getlist("extra_value")):
+        if str(name).strip() in bikes.FIELD_KEYS:
+            return back("/bike", err=f"Zusatzfeld „{name}“ heißt wie ein festes Feld.")
+        values[str(name)] = val
+    try:
+        new = bikes.save_setup(conn(), bike_id, values, str(form.get("note") or ""),
+                               str(form.get("valid_from") or "") or None)
+    except bikes.BikeError as exc:
+        return back("/bike", err=str(exc))
+    return back("/bike", msg="Setup gespeichert (neue Version)." if new else "Keine Änderung.")
+
+
+@app.post("/bike/{bike_id}/photo")
+async def bike_photo_add(request: Request, bike_id: int) -> RedirectResponse:
+    form = await request.form()
+    upload = form.get("photo")
+    if upload is None or not hasattr(upload, "read"):
+        return back("/bike", err="Kein Foto ausgewählt.")
+    data = await upload.read(bikes.MAX_PHOTO_BYTES + 1)
+    try:
+        bikes.add_photo(conn(), bike_id, data, upload.content_type or "", str(form.get("caption") or ""))
+    except bikes.BikeError as exc:
+        return back("/bike", err=str(exc))
+    return back("/bike", msg="Foto gespeichert.")
+
+
+@app.get("/bike/photo/{photo_id}")
+def bike_photo(photo_id: int) -> Response:
+    p = bikes.get_photo(conn(), photo_id)
+    if not p:
+        return PlainTextResponse("nicht gefunden", status_code=404)
+    return Response(p[0], media_type=p[1], headers={"Cache-Control": "private, max-age=86400"})
+
+
+@app.post("/bike/photo/{photo_id}/delete")
+def bike_photo_delete(photo_id: int) -> RedirectResponse:
+    bikes.delete_photo(conn(), photo_id)
+    return back("/bike", msg="Foto gelöscht.")
+
+
+@app.post("/bike/{bike_id}/archive")
+def bike_archive(bike_id: int) -> RedirectResponse:
+    bikes.archive_bike(conn(), bike_id)
+    return back("/bike", msg="Rad archiviert.")
 
 
 @app.post("/settings")

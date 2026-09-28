@@ -6,7 +6,7 @@ from typing import Any
 
 from mcp.server import MCPServer
 
-from . import activities, metrics, performance, plans
+from . import activities, bikes, metrics, performance, plans
 from .db import thread_connection
 from .periodization import week_targets
 from .util import monday_of, parse_week
@@ -132,6 +132,13 @@ def get_session(session_id: int) -> dict[str, Any]:
     return {"id": s["id"], "date": s["date"], "sport": s["sport"], "title": s["title"], "status": s["status"],
             "duration_min": s["duration_s"] // 60, "target_load": s["target_load"], "category": s["category"],
             "steps": steps_as_text(items)}
+
+
+@mcp.tool()
+def get_bike_setup() -> list[dict[str, Any]]:
+    """Räder mit aktuellem Sitz-/Cockpit-Setup (Sattel, Pads, Extensions …) und den letzten Änderungen mit Datum.
+    Nur lesend – ändern kann das Setup nur der Athlet in der Oberfläche (Seite Rad)."""
+    return bikes.bikes_for_llm(conn())
 
 
 @mcp.tool()
