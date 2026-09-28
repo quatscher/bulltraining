@@ -39,6 +39,8 @@ SETTINGS_SCHEMA: dict[str, tuple] = {
     "strength_minutes": ("int", 10, 180, False),
     "strength_description": ("text", None, None, True),
     "publish_lock": ("text", None, None, True),
+    "intervals_api_key": ("secret", None, None, True),
+    "intervals_athlete_id": ("athlete_id", None, None, True),
 }
 
 # Alle Grenzwerte sind Einstellungen, kein Code. Werte als Strings, wie sie in `settings` liegen.
@@ -71,4 +73,7 @@ DEFAULT_SETTINGS: dict[str, str] = {
     "strength_minutes": "45",
     "strength_description": "",
     "publish_lock": "",
+    # intervals.icu-Zugang aus der Weboberfläche; leer = Add-on-Option bzw. Umgebungsvariable
+    "intervals_api_key": "",
+    "intervals_athlete_id": "",
 }

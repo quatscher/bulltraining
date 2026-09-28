@@ -13,16 +13,39 @@ class IntervalsError(RuntimeError):
     pass
 
 
+def _stored(key: str) -> str:
+    """Wert aus den Einstellungen der Datenbank (Weboberfläche); leer, wenn nicht gesetzt oder nicht lesbar."""
+    try:
+        from .db import get_setting, thread_connection
+        return get_setting(thread_connection(), key) or ""
+    except Exception:  # noqa: BLE001 – ohne DB (Tests, CLI ohne Datenbank) gilt die Konfiguration
+        return ""
+
+
+def effective_api_key() -> str:
+    """API-Key: Weboberfläche vor Add-on-Option bzw. Umgebungsvariable."""
+    return _stored("intervals_api_key") or config.INTERVALS_API_KEY
+
+
+def effective_athlete_id() -> str:
+    return _stored("intervals_athlete_id") or config.INTERVALS_ATHLETE_ID
+
+
+def masked(key: str) -> str:
+    return "••••" + key[-4:] if key else ""
+
+
 class IntervalsClient:
     MIN_INTERVAL_S = 0.11  # höchstens ~9 Anfragen pro Sekunde, Limit ist 10
 
     def __init__(self, api_key: str | None = None, athlete_id: str | None = None,
                  base_url: str | None = None, transport: httpx.BaseTransport | None = None,
                  max_retries: int = 3):
-        api_key = api_key if api_key is not None else config.INTERVALS_API_KEY
+        api_key = api_key if api_key is not None else effective_api_key()
         if not api_key and transport is None:
-            raise IntervalsError("INTERVALS_API_KEY ist nicht gesetzt (intervals.icu/settings -> Developer Settings)")
-        self.athlete_id = athlete_id or config.INTERVALS_ATHLETE_ID
+            raise IntervalsError("Kein intervals.icu-API-Key: in den Einstellungen eintragen "
+                                 "(intervals.icu → Settings → Developer Settings)")
+        self.athlete_id = athlete_id or effective_athlete_id()
         self.max_retries = max_retries
         self._last_request = 0.0
         self.rate_remaining: int | None = None
@@ -64,6 +87,9 @@ class IntervalsClient:
         raise IntervalsError(f"{method} {url}: Rate Limit nach {self.max_retries} Versuchen")
 
     # --- lesend ---------------------------------------------------------------
+    def athlete(self) -> dict:
+        return self._request("GET", f"/api/v1/athlete/{self.athlete_id}")
+
     def activities(self, oldest: str, newest: str) -> list[dict]:
         return self._request("GET", f"/api/v1/athlete/{self.athlete_id}/activities",
                              params={"oldest": oldest, "newest": newest}) or []

@@ -11,7 +11,7 @@ changes through MCP – every change needs your confirmation. The user interface
 
 | Option | Description |
 |---|---|
-| `intervals_api_key` | intervals.icu → Settings → Developer Settings. Empty = no automatic sync. |
+| `intervals_api_key` | intervals.icu → Settings → Developer Settings. Can also be set on the add-on's settings page (takes precedence). |
 | `intervals_athlete_id` | `0` = owner of the key. |
 | `mcp_token` | Bearer token for Claude. Empty = generated on first start (see log and settings page). |
 | `sync_interval_minutes` | Sync interval, `0` = off. Publishing workouts to intervals.icu is always a manual step. |

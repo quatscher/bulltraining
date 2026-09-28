@@ -494,9 +494,55 @@ def plans_archive(plan_id: int) -> RedirectResponse:
 
 @app.get("/settings", response_class=HTMLResponse)
 def settings_view(request: Request) -> HTMLResponse:
+    from ..intervals_client import effective_api_key, effective_athlete_id, masked
+    stored = all_settings(conn())
+    key = effective_api_key()
+    intervals = {"masked": masked(key), "source": "Weboberfläche" if stored.get("intervals_api_key") else
+                 ("Add-on-Option" if key else ""), "athlete_id": effective_athlete_id()}
     return render(request, "settings.html",
-                  settings={k: v for k, v in all_settings(conn()).items() if k != "publish_lock"},
-                  mcp=config.MCP_INFO, host=request.headers.get("x-forwarded-host") or request.url.hostname)
+                  settings={k: v for k, v in stored.items() if k not in ("publish_lock", "intervals_api_key", "intervals_athlete_id")},
+                  intervals=intervals, mcp=config.MCP_INFO,
+                  host=request.headers.get("x-forwarded-host") or request.url.hostname)
+
+
+@app.post("/settings/intervals")
+async def settings_intervals(request: Request) -> RedirectResponse:
+    """intervals.icu-Zugang. Ein leeres Key-Feld lässt den gespeicherten Key unverändert (er wird nie angezeigt)."""
+    form = await request.form()
+    values = {}
+    try:
+        if form.get("remove_key"):
+            values["intervals_api_key"] = ""
+        elif str(form.get("api_key") or "").strip():
+            values["intervals_api_key"] = validate_setting("intervals_api_key", form["api_key"])
+        values["intervals_athlete_id"] = validate_setting("intervals_athlete_id", form.get("athlete_id") or "")
+    except SettingError as exc:
+        return back("/settings", err=str(exc))
+    c = conn()
+    with transaction(c):
+        for k, v in values.items():
+            set_setting(c, k, v, validate=False)
+    return back("/settings", msg="intervals.icu-Zugang gespeichert. Mit „Verbindung testen“ prüfen.")
+
+
+@app.post("/settings/intervals/test")
+def settings_intervals_test() -> RedirectResponse:
+    """Zeigt Konto, Garmin-Status und die neueste Aktivität – macht ein leeres Konto sofort sichtbar."""
+    try:
+        with IntervalsClient() as client:
+            a = client.athlete()
+            recent = client.activities((date.today() - timedelta(days=365)).isoformat(), date.today().isoformat())
+            wellness = client.wellness((date.today() - timedelta(days=30)).isoformat(), date.today().isoformat())
+    except (IntervalsError, Exception) as exc:  # noqa: BLE001
+        return back("/settings", err=f"Verbindung fehlgeschlagen: {exc}")
+    newest = max((x.get("start_date_local") or "" for x in recent), default="")
+    garmin = "Garmin verbunden" if a.get("icu_garmin_sync_activities") else "Garmin-Aktivitäten nicht aktiviert"
+    msg = (f"Verbunden mit {a.get('name') or a.get('id')}. {garmin}. Aktivitäten im letzten Jahr: {len(recent)}"
+           f"{', neueste ' + newest[:10] if newest else ''}. Wellness-Tage (30 Tage): {len(wellness)}.")
+    if not recent:
+        return back("/settings", err=msg + " Keine Aktivitäten: in intervals.icu die Garmin-Verbindung prüfen "
+                                           "bzw. neu verbinden.")
+    return back("/settings", msg=msg)
 
 
 @app.post("/settings")
@@ -504,7 +550,7 @@ async def settings_save(request: Request) -> RedirectResponse:
     form = await request.form()
     values, errors = {}, []
     for k, v in form.items():
-        if k == "publish_lock":
+        if k in ("publish_lock", "intervals_api_key", "intervals_athlete_id"):
             continue
         try:
             values[k] = validate_setting(k, v)

@@ -4,6 +4,7 @@ from __future__ import annotations
 import itertools
 import json
 import math
+import re
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -348,6 +349,14 @@ def validate_setting(key: str, value: Any) -> str:
                 raise SettingError(f"{key}: ganze Zahl erwartet.")
             return str(int(number))
         return f"{number:g}"
+    if kind == "secret":
+        if text and not re.fullmatch(r"[A-Za-z0-9_\-]{10,128}", text):
+            raise SettingError(f"{key}: ungültiges Format (10–128 Zeichen, Buchstaben/Ziffern).")
+        return text
+    if kind == "athlete_id":
+        if text and not re.fullmatch(r"i?\d{1,12}", text):
+            raise SettingError(f"{key}: erwartet 0 oder eine Athleten-ID wie i123456.")
+        return text
     if kind == "baseline_json":
         if text == "":
             return ""

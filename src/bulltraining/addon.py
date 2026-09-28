@@ -125,12 +125,21 @@ def _sync_once() -> None:
 
 
 async def sync_loop(interval_min: int) -> None:
-    if interval_min <= 0 or not config.INTERVALS_API_KEY:
-        log("Automatischer Sync aus (kein API-Key oder Intervall 0).")
+    """Sync im festen Intervall. Der API-Key wird jedes Mal neu gelesen: in der Weboberfläche eingetragen, gilt er
+    ohne Neustart."""
+    if interval_min <= 0:
+        log("Automatischer Sync aus (Intervall 0).")
         return
+    from .intervals_client import effective_api_key
     await asyncio.sleep(20)  # Start nicht mit dem Sync blockieren
+    warned = False
     while True:
-        await asyncio.to_thread(_sync_once)
+        if await asyncio.to_thread(effective_api_key):
+            warned = False
+            await asyncio.to_thread(_sync_once)
+        elif not warned:
+            log("Kein intervals.icu-API-Key – Sync wartet, bis einer in den Einstellungen steht.")
+            warned = True
         await asyncio.sleep(interval_min * 60)
 
 
@@ -162,7 +171,7 @@ async def serve(options_path: Path, data_dir: Path, import_path: Path) -> None:
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False), host="0.0.0.0"), token)
     web = uvicorn.Server(uvicorn.Config(web_app, log_level="warning", proxy_headers=True, forwarded_allow_ips="*"))
     mcp_server = uvicorn.Server(uvicorn.Config(mcp_app, log_level="warning"))
-    log(f"Weboberfläche auf Port {WEB_PORT} (Ingress und LAN), MCP auf Port {MCP_PORT}/mcp, Daten in {data_dir}.")
+    log(f"Weboberfläche auf Port {WEB_PORT} (Ingress), MCP auf Port {MCP_PORT}/mcp, Daten in {data_dir}.")
     log(f"MCP-Token: {token}")
     await asyncio.gather(web.serve(sockets=[dual_stack_socket(WEB_PORT)]),
                          mcp_server.serve(sockets=[dual_stack_socket(MCP_PORT)]),

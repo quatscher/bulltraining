@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+- intervals.icu API key and athlete ID can be managed on the settings page (masked, applied without restart);
+  the add-on option remains as fallback
+- "Test connection" shows account, Garmin status, latest activity and wellness days
+- The automatic sync starts as soon as a key is set, no restart needed
+
 ## 0.3.0
 
 - First public release as a Home Assistant add-on repository (AGPL-3.0)

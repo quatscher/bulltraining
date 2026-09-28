@@ -2,6 +2,17 @@
 {% block title %}Einstellungen{% endblock %}
 {% block content %}
 <h1>Einstellungen</h1>
+<div class="card"><h3>intervals.icu</h3>
+  <form method="post" action="{{ root }}/settings/intervals" class="row">
+    <div><label>API-Key {% if intervals.masked %}(aktuell {{ intervals.masked }} · {{ intervals.source }}){% else %}(nicht gesetzt){% endif %}</label>
+      <input name="api_key" type="password" autocomplete="off" placeholder="{{ 'unverändert lassen' if intervals.masked else 'Key einfügen' }}" style="width:260px"></div>
+    <div><label>Athleten-ID</label><input name="athlete_id" value="{{ intervals.athlete_id }}" style="width:110px"></div>
+    <button class="primary">Speichern</button>
+    {% if intervals.source == 'Weboberfläche' %}<label style="margin:0"><input type="checkbox" name="remove_key" value="1"> Key entfernen</label>{% endif %}
+  </form>
+  <p class="small muted">Key aus intervals.icu → Settings → Developer Settings. Er wird nie im Klartext angezeigt; gilt sofort, ohne Neustart.</p>
+  <form method="post" action="{{ root }}/settings/intervals/test"><button>Verbindung testen</button></form>
+</div>
 {% if mcp %}
 <div class="card"><h3>Claude-Zugang (MCP)</h3>
   {% set h = (host or 'homeassistant.local').split(':')[0] %}
