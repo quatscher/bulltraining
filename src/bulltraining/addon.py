@@ -1,8 +1,10 @@
 """Betrieb als Home-Assistant-Add-on.
 
 Ein Prozess, drei Aufgaben:
-- Weboberfläche auf Port 8099, nur über Home-Assistant-Ingress erreichbar (HA-Login schützt den Zugriff)
-- MCP-Server über HTTP auf Port 8765 für Claude, nur mit Bearer-Token
+- Weboberfläche auf Port 8099: über Home-Assistant-Ingress (Seitenleiste); der Port wird nicht veröffentlicht, im
+  LAN nur über einen eigenen Reverse-Proxy auf den Add-on-Hostnamen
+- MCP-Server über HTTP auf Port 8765 für Claude, nur mit Bearer-Token; Port in HA standardmäßig nicht freigegeben
+Beide Sockets nehmen IPv4 und IPv6 an.
 - Sync mit intervals.icu im festen Intervall (Veröffentlichen bleibt ein bewusster Knopfdruck)
 
 Daten liegen in /data (lokal auf dem Pi, in HA-Backups enthalten). Eine vorhandene Datenbank kann einmalig über
@@ -15,6 +17,7 @@ import hmac
 import json
 import secrets
 import shutil
+import socket
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -92,6 +95,22 @@ class BearerAuth:
         await self.app(scope, receive, send)
 
 
+def dual_stack_socket(port: int) -> socket.socket:
+    """Ein Socket für IPv4 und IPv6. asyncio würde bei '::' IPV6_V6ONLY setzen und IPv4 damit ausschließen."""
+    try:
+        sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("::", port))
+    except OSError:  # System ohne IPv6
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind(("0.0.0.0", port))
+    sock.listen(128)
+    sock.setblocking(False)
+    return sock
+
+
 def _sync_once() -> None:
     from .db import thread_connection
     from .intervals_client import IntervalsClient
@@ -141,12 +160,12 @@ async def serve(options_path: Path, data_dir: Path, import_path: Path) -> None:
     # ein Browser kann den Authorization-Header ohne CORS-Freigabe nicht fremd setzen.
     mcp_app = BearerAuth(mcp.streamable_http_app(
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False), host="0.0.0.0"), token)
-    web = uvicorn.Server(uvicorn.Config(web_app, host="0.0.0.0", port=WEB_PORT, log_level="warning",
-                                        proxy_headers=True, forwarded_allow_ips="*"))
-    mcp_server = uvicorn.Server(uvicorn.Config(mcp_app, host="0.0.0.0", port=MCP_PORT, log_level="warning"))
-    log(f"Weboberfläche auf Port {WEB_PORT} (Ingress), MCP auf Port {MCP_PORT}/mcp, Daten in {data_dir}.")
+    web = uvicorn.Server(uvicorn.Config(web_app, log_level="warning", proxy_headers=True, forwarded_allow_ips="*"))
+    mcp_server = uvicorn.Server(uvicorn.Config(mcp_app, log_level="warning"))
+    log(f"Weboberfläche auf Port {WEB_PORT} (Ingress und LAN), MCP auf Port {MCP_PORT}/mcp, Daten in {data_dir}.")
     log(f"MCP-Token: {token}")
-    await asyncio.gather(web.serve(), mcp_server.serve(),
+    await asyncio.gather(web.serve(sockets=[dual_stack_socket(WEB_PORT)]),
+                         mcp_server.serve(sockets=[dual_stack_socket(MCP_PORT)]),
                          sync_loop(int(options.get("sync_interval_minutes", 60))))
 
 

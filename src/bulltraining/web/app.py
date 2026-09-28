@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 
@@ -54,6 +55,8 @@ async def ingress_and_origin(request: Request, call_next: Any) -> Any:
     if request.method not in ("GET", "HEAD", "OPTIONS") and not _same_origin(request):
         return PlainTextResponse("Schreibzugriff nur von bulltraining selbst.", status_code=403)
     return await call_next(request)
+# Bibliotheken liegen lokal bei (kein CDN): funktioniert offline, und es gehen keine Aufrufe an Dritte
+app.mount("/static", StaticFiles(directory=str(Path(__file__).parent / "static")), name="static")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.filters["pace"] = lambda v, unit="/km": fmt_pace(v, unit) or "–"
 templates.env.filters["minutes"] = lambda s: f"{int(s or 0) // 60} min"

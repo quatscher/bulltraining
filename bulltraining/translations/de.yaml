@@ -1,0 +1,15 @@
+configuration:
+  intervals_api_key:
+    name: intervals.icu-API-Key
+    description: Aus intervals.icu → Settings → Developer Settings. Leer lassen, um den automatischen Sync abzuschalten.
+  intervals_athlete_id:
+    name: intervals.icu-Athleten-ID
+    description: "0 steht für den Besitzer des API-Keys."
+  mcp_token:
+    name: MCP-Token
+    description: Token für Claude. Leer lassen, dann wird beim ersten Start eines erzeugt (steht im Log und in den Einstellungen).
+  sync_interval_minutes:
+    name: Sync-Intervall (Minuten)
+    description: Wie oft Aktivitäten und Wellness-Daten aus intervals.icu geholt werden. 0 schaltet den Sync ab.
+network:
+  8765/tcp: MCP-Server für Claude (nur mit Token). Nur aktivieren, wenn Claude direkt zugreifen soll.

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -55,6 +56,22 @@ def _call(app, headers):
     return sent[0]["status"]
 
 
+def test_dual_stack_socket_accepts_ipv4_and_ipv6():
+    import socket
+    sock = addon.dual_stack_socket(0)
+    port = sock.getsockname()[1]
+    try:
+        for family, host in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
+            if family == socket.AF_INET6 and sock.family != socket.AF_INET6:
+                continue
+            c = socket.socket(family, socket.SOCK_STREAM)
+            c.settimeout(3)
+            c.connect((host, port))
+            c.close()
+    finally:
+        sock.close()
+
+
 def test_bearer_auth():
     async def inner(scope, receive, send):
         await send({"type": "http.response.start", "status": 200, "headers": []})
@@ -101,6 +118,10 @@ def test_settings_page_shows_mcp_access(ingress_client, monkeypatch):
 
 def test_addon_config_matches_code():
     from pathlib import Path
-    cfg = (Path(__file__).resolve().parents[1] / "homeassistant" / "bulltraining" / "config.yaml").read_text(encoding="utf-8")
-    assert f"ingress_port: {addon.WEB_PORT}" in cfg and f"{addon.MCP_PORT}/tcp: {addon.MCP_PORT}" in cfg
+    root = Path(__file__).resolve().parents[1]
+    cfg = (root / "bulltraining" / "config.yaml").read_text(encoding="utf-8")
+    assert f"ingress_port: {addon.WEB_PORT}" in cfg and f"{addon.MCP_PORT}/tcp: null" in cfg  # MCP-Port standardmäßig aus
+    assert "host_network" not in cfg  # Weboberfläche nur über Ingress
+    version = re.search(r'^version = "([^"]+)"', (root / "pyproject.toml").read_text(encoding="utf-8"), re.M).group(1)
+    assert f'version: "{version}"' in cfg  # CI prüft dasselbe vor dem Image-Build
     assert json.dumps("share:rw")[1:-1] in cfg

@@ -1,7 +1,10 @@
 [project]
 name = "bulltraining"
-version = "0.2.0"
-description = "Persönliches Trainingssystem: intervals.icu-Spiegel, Kennzahlen, Leistungstests, Plan per MCP"
+version = "0.3.0"
+description = "Endurance training planning with intervals.icu, performance tests and an MCP server for Claude"
+readme = "README.md"
+license = {text = "AGPL-3.0-or-later"}
+authors = [{name = "quatscher"}]
 requires-python = ">=3.11"
 dependencies = [
   "httpx>=0.27",
@@ -12,6 +15,9 @@ dependencies = [
   "jinja2>=3.1",
   "python-multipart>=0.0.9",
 ]
+
+[project.urls]
+Homepage = "https://github.com/quatscher/bulltraining"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
@@ -27,7 +33,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-bulltraining = ["plan_templates/*.json", "web/templates/*.html"]
+bulltraining = ["plan_templates/*.json", "web/templates/*.html", "web/static/*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
