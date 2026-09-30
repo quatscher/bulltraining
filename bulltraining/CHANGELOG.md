@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+- Swim workouts are planned in metres (50 m grid) so Garmin advances steps by lap count in the pool;
+  pace comes from the CSS test or, without one, from recent swims
+- Rest steps use `intensity=rest`: shown as rest on the watch and advance automatically
+
 ## 0.4.0
 
 - New page *Rad*: bike fit setup per bike (saddle, cockpit, pads, extensions, custom fields) with dated versions,

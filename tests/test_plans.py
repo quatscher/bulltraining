@@ -94,7 +94,9 @@ def test_propose_apply_and_revert(conn):
     ch = plans.propose_plan_change(conn, [{"op": "change_duration", "session_id": target["id"], "duration_min": 30}],
                                    "HRV unter Baseline, Umfang reduzieren", today=TODAY)
     plans.apply_change(conn, ch["change_id"], today=TODAY)
-    assert plans._current(conn, target["id"])["duration_s"] == 1800
+    got = plans._current(conn, target["id"])["duration_s"]
+    # Schwimmen wird in Metern (50-m-Raster) geplant und trifft die Dauer nur ungefähr
+    assert got == 1800 if target["sport"] != "swim" else abs(got - 1800) <= 120
     plans.revert_change(conn, ch["change_id"], today=TODAY)
     assert plans._current(conn, target["id"])["duration_s"] == target["duration_s"]
     plans.revert_change(conn, res["change_id"], today=TODAY)

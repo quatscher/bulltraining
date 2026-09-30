@@ -78,20 +78,41 @@ def estimate_load(duration_min: float, intensity: str) -> float:
 
 class _Targets:
     def __init__(self, conn: sqlite3.Connection, sport: str):
+        from .workout_syntax import DEFAULT_PACE
+        from .zonemodel import swim_reference_pace
         self.sport = sport
+        # Schwimmen wird in Metern geplant: im Becken zählt die Uhr Bahnen und schaltet Streckenschritte selbst weiter
+        self.swim_pace = (swim_reference_pace(conn) or DEFAULT_PACE["swim"]) if sport == "swim" else None
         self.threshold = get_float(conn, THRESHOLD_KEY[sport]) if sport in THRESHOLD_KEY else None
         # Jeder vorhandene Test ist Grundlage für %-Vorgaben – auch ein veralteter (der Generator setzt dann einen
         # Retest an). Ohne jeden Test wird nach Pulszone vorgegeben.
         self.valid = self.threshold is not None and test_status(conn, sport)["status"] != "missing"
 
-    def step(self, minutes: int, zone: str) -> str:
-        if minutes <= 0:
-            return ""
+    def target(self, zone: str) -> str:
         if self.valid and self.sport in PCT:
             lo, hi = PCT[self.sport][zone]
-            suffix = "%" if self.sport == "ride" else "% Pace"
-            return f"- {minutes}m {lo}-{hi}{suffix}"
-        return f"- {minutes}m {HR_ZONE[zone]} HR"
+            return f"{lo}-{hi}" + ("%" if self.sport == "ride" else "% Pace")
+        return f"{HR_ZONE[zone]} HR"
+
+    def step(self, minutes: float, zone: str, label: str = "") -> str:
+        if minutes <= 0:
+            return ""
+        prefix = f"- {label} " if label else "- "
+        if self.sport == "swim":
+            return f"{prefix}{self.meters(minutes, zone)}mtr {self.target(zone)}"
+        return f"{prefix}{round(minutes)}m {self.target(zone)}"
+
+    def meters(self, minutes: float, zone: str) -> int:
+        """Strecke, die in `minutes` bei dieser Zone geschwommen wird – auf 50 m gerundet (gerade Bahnzahl im
+        25-m-Becken). Dieselbe Pace-Annahme wie das Zonenmodell, damit Dauer und Last übereinstimmen."""
+        from .workout_syntax import parse_target
+        frac = parse_target("swim", self.target(zone).split(), pace=self.swim_pace)["frac"]
+        return max(50, int(round(minutes * 60 * frac * 100 / self.swim_pace / 50)) * 50)
+
+    @staticmethod
+    def pause(seconds: int) -> str:
+        """Echte Pause: intervals.icu/Garmin zeigen „Erholung“ und schalten nach Ablauf selbst weiter."""
+        return f"- {int(seconds)}s intensity=rest"
 
     def note(self, zone: str) -> str | None:
         if not self.valid or self.sport not in PCT:
@@ -145,24 +166,31 @@ def build(conn: sqlite3.Connection, sport: str, intensity: str, duration_min: in
         lines += ["Einlaufen" if sport == "run" else "Aufwärmen", t.step(wu, "wu"), ""]
         if note:
             lines.append(note)
-        lines += [f"{reps}x", t.step(work, intensity), t.step(rest, "rest"), ""]
+        pause = t.pause(rest * 30) if sport == "swim" else t.step(rest, "rest")  # im Wasser: am Rand stehen
+        lines += [f"{reps}x", t.step(work, intensity), pause, ""]
         if filler > 0:
             lines += [t.step(filler, "easy"), ""]
         lines += ["Ausklang", t.step(cd, "rest")]
     elif sport == "swim" and intensity in ("easy", "long", "recovery") and duration_min >= 30:
-        # Schwimmen ist bei den meisten Triathleten Technik-limitiert: jede lockere Einheit mit Technikblock
+        # Schwimmen ist bei den meisten Triathleten Technik-limitiert: jede lockere Einheit mit Technikblock.
+        # Alles in Metern mit echten Pausen: die Uhr schaltet im Becken selbst weiter.
         reps = 6 if duration_min >= 40 else 4
         wu, cd = 10, 5
-        main = duration_min - wu - cd - int(reps * 2.5)
         zone = intensity if intensity in PCT[sport] else "easy"
+        drill = f"- Drill 50mtr {t.target('recovery')}"
+        drill_min = 50 / 100 * t.swim_pace / 0.72 / 60 + 20 / 60
+        main = max(4.0, duration_min - wu - cd - reps * drill_min)
+        per_rep = 200 / 100 * t.swim_pace / 0.83 / 60 + 20 / 60  # 200 m locker + 20 s Pause
+        main_reps = max(1, round(main / per_rep))
         title = f"Schwimmen Technik + {INTENSITY_LABEL.get(intensity, intensity)} {duration_min} min"
         note = t.note(zone)
         lines += ["Einschwimmen", t.step(wu, "wu"), "",
                   "Technik: Drills im Wechsel – Abschlagschwimmen, Faustschwimmen, Züge pro Bahn zählen",
-                  f"{reps}x", t.step(2, "recovery"), "- 30s rest", ""]
+                  f"{reps}x", drill, t.pause(20), ""]
         if note:
             lines.append(note)
-        lines += ["Grundlage: lang gleiten, Wasserlage halten, unter Wasser ausatmen", t.step(main, zone), "",
+        lines += ["Grundlage: lang gleiten, Wasserlage halten, unter Wasser ausatmen", f"{main_reps}x",
+                  f"- 200mtr {t.target(zone)}", t.pause(20), "",
                   "Ausschwimmen", t.step(cd, "rest")]
     else:
         zone = intensity if intensity in PCT[sport] else "easy"
@@ -175,9 +203,11 @@ def build(conn: sqlite3.Connection, sport: str, intensity: str, duration_min: in
         title += f" {duration_min} min"
     description = "\n".join(l for l in lines if l is not None).strip()
     from .zonemodel import description_zone_secs
-    steps = description_zone_secs(description, sport)
-    if steps and sum(steps) > 0 and abs(sum(steps) - duration_min * 60) > 1:
-        duration_min = round(sum(steps) / 60)  # Planung, Last und Export rechnen mit derselben Dauer
+    steps = description_zone_secs(description, sport, pace=t.swim_pace if sport == "swim" else None)
+    duration_s = duration_min * 60
+    if steps and sum(steps) > 0 and abs(sum(steps) - duration_s) > 1:
+        # Planung, Last und Export rechnen mit derselben Dauer (Strecken im 50-m-Raster treffen sie nur ungefähr)
+        duration_s = int(round(sum(steps)))
     return {"title": title, "description": description,
-            "duration_s": duration_min * 60, "target_load": estimate_load(duration_min, intensity),
+            "duration_s": duration_s, "target_load": estimate_load(duration_s / 60, intensity),
             "intensity": intensity, "category": "WORKOUT", "test_protocol": None}

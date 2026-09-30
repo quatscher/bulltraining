@@ -59,4 +59,22 @@ def activity_zone_secs(zone_times: str | dict | None) -> list[float] | None:
 
 
 def reference_paces(conn: sqlite3.Connection) -> dict[str, float | None]:
-    return {"run": get_float(conn, "threshold_pace_run_s_per_km"), "swim": get_float(conn, "css_s_per_100m")}
+    return {"run": get_float(conn, "threshold_pace_run_s_per_km"), "swim": swim_reference_pace(conn)}
+
+
+# Ø-Pace einer lockeren Schwimmeinheit (inkl. Drills) liegt grob bei 83 % der CSS-Geschwindigkeit
+SWIM_EASY_TO_CSS = 0.83
+
+
+def swim_reference_pace(conn: sqlite3.Connection) -> float | None:
+    """CSS aus dem Test; ohne Test eine Schätzung aus den letzten Schwimmeinheiten (Median der Ø-Pace).
+    Schwimmeinheiten werden in Metern geplant – ohne realistische Pace würden Dauer und Last nicht stimmen."""
+    css = get_float(conn, "css_s_per_100m")
+    if css:
+        return css
+    rows = conn.execute("SELECT duration_s, distance_m FROM activities WHERE sport = 'swim' AND excluded = 0 "
+                        "AND distance_m >= 400 AND duration_s > 0 ORDER BY start_date DESC LIMIT 5").fetchall()
+    paces = sorted(r["duration_s"] / r["distance_m"] * 100 for r in rows)
+    if not paces:
+        return None
+    return round(paces[len(paces) // 2] * SWIM_EASY_TO_CSS, 1)

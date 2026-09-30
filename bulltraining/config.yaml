@@ -1,5 +1,5 @@
 name: bulltraining
-version: "0.4.0"
+version: "0.4.1"
 slug: bulltraining
 description: Endurance training planning with intervals.icu, performance tests and an MCP server for Claude
 url: https://github.com/quatscher/bulltraining

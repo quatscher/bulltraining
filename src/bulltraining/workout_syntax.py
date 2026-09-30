@@ -10,7 +10,7 @@ Unterstützt:
   oder Textzeile
 - Schritt: "- [Beschriftung] <Dauer> [Ziel] [Trittfrequenz]"
   Dauer: 10m, 30s, 1h, 1h30m, 1m30s | Distanz: 400mtr, 5km
-  Ziel: leer | rest | max | 55-65% (Rad: % FTP) | 78-86% Pace | 90% HR / 95% LTHR | Z2 / Z1-Z2 [HR|Pace|Power]
+  Ziel: leer | rest / intensity=rest (Pause, schaltet auf der Uhr nach Zeit weiter) | max | 55-65% (Rad: % FTP) | 78-86% Pace | 90% HR / 95% LTHR | Z2 / Z1-Z2 [HR|Pace|Power]
         | 200w / 180-220w | ramp 50-150% | 4:30/km Pace / 1:50-2:00/100m Pace
   Trittfrequenz: 90rpm / 85-95rpm (wird ignoriert)
 """
@@ -66,7 +66,7 @@ def parse_target(sport: str, tokens: list[str], ftp: float | None = None,
     low = [t.lower() for t in toks]
     if not low:
         return {"kind": "none", "zone": 1, "frac": ZONE_FRAC[1]}
-    if low == ["rest"] or low == ["recovery"]:
+    if low in (["rest"], ["recovery"], ["intensity=rest"]):
         return {"kind": "rest", "zone": 0, "frac": 0.65}
     if low == ["max"]:
         return {"kind": "max", "zone": 4, "frac": 1.05}

@@ -59,7 +59,7 @@ PROTOCOLS: dict[str, dict[str, Any]] = {
         "summary": "400 m und 200 m maximal mit Pause. CSS = (t400 − t200) / 2 je 100 m.",
         "inputs": {"t400": ("Zeit 400 m, mm:ss", True), "t200": ("Zeit 200 m, mm:ss", True)},
         "duration_min": 45, "load_if": 0.75,
-        "description": "Einschwimmen\n- 400mtr Z1\n4x\n- 50mtr Z3\n- 15s rest\n\nTest\n- 400mtr max\n- 5m rest\n- 200mtr max\n\nAusschwimmen\n- 200mtr Z1",
+        "description": "Einschwimmen\n- 400mtr Z1\n4x\n- 50mtr Z3\n- 15s intensity=rest\n\nTest\n- 400mtr max\n- 5m intensity=rest\n- 200mtr max\n\nAusschwimmen\n- 200mtr Z1",
     },
 }
 
