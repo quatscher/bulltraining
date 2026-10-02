@@ -33,7 +33,9 @@ def description_zone_secs(description: str | None, sport: str, pace: float | Non
 
 def session_zone_secs(session: dict[str, Any], paces: dict[str, float | None]) -> list[float]:
     """Zeit je Zone einer geplanten Einheit; ohne auswertbare Beschreibung nach Intensität geschätzt."""
-    parsed = description_zone_secs(session.get("description"), session["sport"], paces.get(session["sport"]))
+    sport = session["sport"]
+    parsed = description_zone_secs(session.get("description"), sport,
+                                   pace=paces.get(sport) if sport != "ride" else None, ftp=paces.get("ride"))
     total = float(session.get("duration_s") or 0)
     if parsed and sum(parsed) > 0:
         # auf die geplante Dauer skalieren (Distanzschritte sind nur geschätzt)
@@ -59,7 +61,8 @@ def activity_zone_secs(zone_times: str | dict | None) -> list[float] | None:
 
 
 def reference_paces(conn: sqlite3.Connection) -> dict[str, float | None]:
-    return {"run": get_float(conn, "threshold_pace_run_s_per_km"), "swim": swim_reference_pace(conn)}
+    return {"run": get_float(conn, "threshold_pace_run_s_per_km"), "swim": swim_reference_pace(conn),
+            "ride": get_float(conn, "ftp_w")}
 
 
 # Ø-Pace einer lockeren Schwimmeinheit (inkl. Drills) liegt grob bei 83 % der CSS-Geschwindigkeit

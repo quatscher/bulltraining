@@ -4,7 +4,7 @@ import pytest
 
 from bulltraining import metrics, plans, workouts
 from bulltraining.performance import PROTOCOLS, record_test
-from bulltraining.zonemodel import activity_zone_secs, description_zone_secs, session_zone_secs
+from bulltraining.zonemodel import reference_paces, activity_zone_secs, description_zone_secs, session_zone_secs
 
 from .conftest import TODAY, add_activity
 
@@ -38,11 +38,13 @@ def test_all_test_protocols_parse():
 def test_generated_workouts_match_intensity(conn):
     record_test(conn, date=TODAY.isoformat(), protocol="ride_ftp20", inputs={"avg_power_20min_w": 260})
     thr = workouts.build(conn, "ride", "threshold", 75)
-    secs = session_zone_secs({**thr, "sport": "ride"}, {})
+    paces = reference_paces(conn)  # wie im Programm: Watt-Vorgaben brauchen die FTP zur Zonenzuordnung
+    assert "w" in thr["description"] and "%" not in thr["description"]
+    secs = session_zone_secs({**thr, "sport": "ride"}, paces)
     assert sum(secs) == pytest.approx(75 * 60, abs=5)
     assert secs[3] == max(secs)  # Schwellenanteil dominiert
     easy = workouts.build(conn, "ride", "easy", 60)
-    assert mins(session_zone_secs({**easy, "sport": "ride"}, {})) == [0, 60, 0, 0, 0]
+    assert mins(session_zone_secs({**easy, "sport": "ride"}, paces)) == [0, 60, 0, 0, 0]
 
 
 def test_fallback_without_description():
@@ -70,3 +72,17 @@ def test_timeline_planned_and_done(conn):
     assert week["planned"] == [0, 40, 0, 10, 0] and week["done_without_zones"] == 30
     assert metrics.week_summary(conn, TODAY)["zones_min"]["done"] == [10, 30, 5, 5, 0]
     assert metrics.zone_timeline(conn, TODAY - timedelta(days=1), TODAY)[0]["planned"] == [0] * 5
+
+
+def test_no_percent_targets_on_the_watch(conn):
+    """%-Vorgaben rechnen intervals.icu und die Uhr gegen ihre eigene Schwelle – nur absolute Werte, Puls-Zonen
+    oder Schritt-Typen dürfen in Beschreibungen stehen, die veröffentlicht werden."""
+    for spec in PROTOCOLS.values():
+        assert "%" not in spec["description"], spec["name"]
+    record_test(conn, date=TODAY.isoformat(), protocol="ride_ftp20", inputs={"avg_power_20min_w": 260})
+    record_test(conn, date=TODAY.isoformat(), protocol="run_30min_tt", inputs={"distance_m": 7000})
+    record_test(conn, date=TODAY.isoformat(), protocol="swim_css", inputs={"t400": "8:00", "t200": "3:50"})
+    for sport in ("ride", "run", "swim"):
+        for intensity in ("recovery", "easy", "long", "tempo", "threshold", "vo2"):
+            b = workouts.build(conn, sport, intensity, 60)
+            assert "%" not in b["description"], (sport, intensity, b["description"])

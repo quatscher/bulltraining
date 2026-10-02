@@ -1,7 +1,8 @@
 """Einzelne Einheiten: Struktur in Intervals-Syntax, Titel und geschätzte Belastung.
 
-Zielvorgaben sind %-Angaben der Schwelle aus dem letzten Leistungstest (Rad: % FTP, Laufen/Schwimmen: % Pace).
-Ohne gültigen Test fällt die Einheit auf Pulszonen zurück. Absolute Zielwerte stehen als Kommentarzeile dabei.
+Zielvorgaben kommen aus der Schwelle des letzten Leistungstests, aber als absolute Werte (Watt, Pace): eine
+%-Angabe rechnen intervals.icu und die Uhr gegen ihre eigene, oft abweichende Schwelle. Ohne Test fällt die
+Einheit auf Pulszonen zurück.
 """
 from __future__ import annotations
 
@@ -91,7 +92,12 @@ class _Targets:
     def target(self, zone: str) -> str:
         if self.valid and self.sport in PCT:
             lo, hi = PCT[self.sport][zone]
-            return f"{lo}-{hi}" + ("%" if self.sport == "ride" else "% Pace")
+            t = self.threshold
+            if self.sport == "ride":
+                return f"{round(t * lo / 100)}-{round(t * hi / 100)}w"
+            unit = "/km" if self.sport == "run" else "/100m"
+            fast, slow = fmt_pace(t / (hi / 100), ""), fmt_pace(t / (lo / 100), "")
+            return f"{fast}-{slow}{unit} Pace"
         return f"{HR_ZONE[zone]} HR"
 
     def step(self, minutes: float, zone: str, label: str = "") -> str:
@@ -106,7 +112,7 @@ class _Targets:
         """Strecke, die in `minutes` bei dieser Zone geschwommen wird – auf 50 m gerundet (gerade Bahnzahl im
         25-m-Becken). Dieselbe Pace-Annahme wie das Zonenmodell, damit Dauer und Last übereinstimmen."""
         from .workout_syntax import parse_target
-        frac = parse_target("swim", self.target(zone).split(), pace=self.swim_pace)["frac"]
+        frac = parse_target("swim", self.target(zone).split(), pace=self.swim_pace)["frac"]  # CSS bzw. Schätzung
         return max(50, int(round(minutes * 60 * frac * 100 / self.swim_pace / 50)) * 50)
 
     @staticmethod
@@ -117,12 +123,11 @@ class _Targets:
     def note(self, zone: str) -> str | None:
         if not self.valid or self.sport not in PCT:
             return "Keine gültige Schwelle aus einem Leistungstest – Vorgabe nach Pulszone."
-        lo, hi = PCT[self.sport][zone]
         t = self.threshold
         if self.sport == "ride":
-            return f"Ziel {round(t * lo / 100)}–{round(t * hi / 100)} W (FTP {t:.0f} W)"
+            return f"Vorgaben aus FTP {t:.0f} W"
         unit = "/km" if self.sport == "run" else "/100m"
-        return f"Ziel {fmt_pace(t / (hi / 100), unit)}–{fmt_pace(t / (lo / 100), unit)} (Schwelle {fmt_pace(t, unit)})"
+        return f"Vorgaben aus Schwelle {fmt_pace(t, unit)}"
 
 
 def build(conn: sqlite3.Connection, sport: str, intensity: str, duration_min: int,
@@ -203,7 +208,9 @@ def build(conn: sqlite3.Connection, sport: str, intensity: str, duration_min: in
         title += f" {duration_min} min"
     description = "\n".join(l for l in lines if l is not None).strip()
     from .zonemodel import description_zone_secs
-    steps = description_zone_secs(description, sport, pace=t.swim_pace if sport == "swim" else None)
+    steps = description_zone_secs(description, sport,
+                                  pace=t.swim_pace if sport == "swim" else (t.threshold if sport == "run" else None),
+                                  ftp=t.threshold if sport == "ride" else None)
     duration_s = duration_min * 60
     if steps and sum(steps) > 0 and abs(sum(steps) - duration_s) > 1:
         # Planung, Last und Export rechnen mit derselben Dauer (Strecken im 50-m-Raster treffen sie nur ungefähr)

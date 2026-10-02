@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2
+
+- Workout targets are absolute (pace per km/100 m, watts) instead of percentages: intervals.icu and the watch
+  evaluate percentages against their own thresholds, which are often missing or different
+- Test protocols without percentage targets; hard sections are `intensity=interval` steps (by feel)
+- Ramp test as 1-minute steps in watts
+
 ## 0.4.1
 
 - Swim workouts are planned in metres (50 m grid) so Garmin advances steps by lap count in the pool;

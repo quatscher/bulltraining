@@ -10,7 +10,8 @@ Unterstützt:
   oder Textzeile
 - Schritt: "- [Beschriftung] <Dauer> [Ziel] [Trittfrequenz]"
   Dauer: 10m, 30s, 1h, 1h30m, 1m30s | Distanz: 400mtr, 5km
-  Ziel: leer | rest / intensity=rest (Pause, schaltet auf der Uhr nach Zeit weiter) | max | 55-65% (Rad: % FTP) | 78-86% Pace | 90% HR / 95% LTHR | Z2 / Z1-Z2 [HR|Pace|Power]
+  Ziel: leer | rest / intensity=rest (Pause, schaltet auf der Uhr nach Zeit weiter) | max
+        | intensity=interval/active (hart nach Gefühl, z. B. Test) | intensity=warmup/cooldown/recovery | 55-65% (Rad: % FTP) | 78-86% Pace | 90% HR / 95% LTHR | Z2 / Z1-Z2 [HR|Pace|Power]
         | 200w / 180-220w | ramp 50-150% | 4:30/km Pace / 1:50-2:00/100m Pace
   Trittfrequenz: 90rpm / 85-95rpm (wird ignoriert)
 """
@@ -68,6 +69,11 @@ def parse_target(sport: str, tokens: list[str], ftp: float | None = None,
         return {"kind": "none", "zone": 1, "frac": ZONE_FRAC[1]}
     if low in (["rest"], ["recovery"], ["intensity=rest"]):
         return {"kind": "rest", "zone": 0, "frac": 0.65}
+    # Schritt-Typ ohne Zielwert: auf der Uhr ohne Vorgabe, die hier nicht zur Schwelle von intervals.icu passen müsste
+    if low in (["intensity=interval"], ["intensity=active"]):
+        return {"kind": "effort", "zone": 3, "frac": ZONE_FRAC[3]}
+    if low in (["intensity=warmup"], ["intensity=cooldown"], ["intensity=recovery"]):
+        return {"kind": "easy", "zone": 0, "frac": ZONE_FRAC[0]}
     if low == ["max"]:
         return {"kind": "max", "zone": 4, "frac": 1.05}
     ramp = low[0] == "ramp"
@@ -108,8 +114,9 @@ def parse_target(sport: str, tokens: list[str], ftp: float | None = None,
     m = _PACE.match(head)
     if m and rest in ([], ["pace"]) and sport in ("run", "swim"):
         unit = m.group(3).lower()
-        if (unit == "km") != (sport == "run") or not pace:
+        if (unit == "km") != (sport == "run"):
             return None
+        pace = pace or DEFAULT_PACE[sport]  # Zone nur geschätzt, die Vorgabe selbst ist absolut
         slow = _mmss(m.group(1))
         fast = _mmss(m.group(2)) if m.group(2) else slow
         fast, slow = min(fast, slow), max(fast, slow)
