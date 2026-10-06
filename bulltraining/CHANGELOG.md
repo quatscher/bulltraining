@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.3
+
+- Fix: weeks before the date of a self-reported baseline keep counting with the stated volume once real data
+  arrives (data quality "mixed"). Previously one old activity made the data look "ok", the weeks before a data
+  restart counted as zero and the weekly load cap collapsed (e.g. to 91)
+- Test result hint updated for absolute targets
+
 ## 0.4.2
 
 - Workout targets are absolute (pace per km/100 m, watts) instead of percentages: intervals.icu and the watch

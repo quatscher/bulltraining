@@ -173,9 +173,9 @@ def record_test(conn: sqlite3.Connection, *, date: str, protocol: str, inputs: d
                       "applied": k in applied}
     return {"test_id": cur.lastrowid, "date": d, "sport": sport, "protocol": protocol, "results": results,
             "changes": changes, "linked_plan_session": session["id"] if session else None,
-            "hint": ("Schwellenwerte lokal übernommen. Beschreibungen geplanter Einheiten nutzen %-Angaben; "
-                     "damit Uhr und intervals.icu dieselben Ziele zeigen, die Werte dort in den Sport-Einstellungen "
-                     "angleichen.") if applied else None}
+            "hint": ("Schwellenwerte lokal übernommen. Neu erzeugte Einheiten bekommen absolute Vorgaben daraus; schon "
+                     "geplante Einheiten mit Puls-Zonen rechnet die Uhr gegen die Zonen in intervals.icu – dort die "
+                     "Schwellenwerte angleichen oder die Einheiten neu erzeugen.") if applied else None}
 
 
 def delete_test(conn: sqlite3.Connection, test_id: int, today: date | None = None) -> dict[str, Any]:

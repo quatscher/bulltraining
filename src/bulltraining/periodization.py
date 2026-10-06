@@ -155,12 +155,17 @@ def reference_week(conn: sqlite3.Connection, plan: dict[str, Any], monday: date,
     """
     weeks = int(baseline.get("weeks") or 4)
     effs = [week_effective(conn, monday - timedelta(weeks=k), sessions, today) for k in range(1, weeks + 1)]
-    if baseline.get("data_quality") == "manual" and baseline.get("manual_as_of"):
-        # Wochen vor der Selbstauskunft ohne Daten zählen mit dem angegebenen Umfang
-        manual_until = to_date(baseline["manual_as_of"])
+    from .metrics import manual_baseline
+    manual = manual_baseline(conn)
+    if manual and manual.get("as_of"):
+        # Wochen vor der Selbstauskunft zählen mindestens mit dem angegebenen Umfang – auch wenn einzelne
+        # Aktivitäten (z. B. eine Krafteinheit) aus dieser Zeit vorliegen
+        from .metrics import _baseline_from_manual
+        mb = _baseline_from_manual(manual, today, weeks, {"ctl_endurance": 0, "form_endurance": 0})
+        manual_until = to_date(manual["as_of"])
         for k, e in enumerate(effs, start=1):
-            if e["load"] == 0 and monday - timedelta(weeks=k) + timedelta(days=6) <= manual_until:
-                effs[k - 1] = {**e, "load": baseline["avg_endurance_load"], "hours": baseline["avg_endurance_hours"]}
+            if monday - timedelta(weeks=k) + timedelta(days=6) <= manual_until and e["load"] < mb["avg_endurance_load"]:
+                effs[k - 1] = {**e, "load": mb["avg_endurance_load"], "hours": mb["avg_endurance_hours"]}
     chronic_load = sum(e["load"] for e in effs) / weeks
     chronic_hours = sum(e["hours"] for e in effs) / weeks
     if chronic_load <= 0:

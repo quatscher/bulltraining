@@ -70,3 +70,21 @@ def test_strength_uses_configured_routine(conn):
     strength = [s for s in g["sessions"] if s["sport"] == "strength"]
     assert len(strength) == 2 and strength[0]["duration_s"] == 3000
     assert strength[0]["description"].startswith("Klimmzüge")
+
+
+def test_stated_weeks_still_count_after_first_real_week(conn):
+    """Regression 2026-10-06: Nach dem Datenneustart lag eine Krafteinheit am Tag der Selbstauskunft vor, danach eine
+    echte Woche. Der Code hielt die Daten für „ok“, zählte die Wochen davor als 0 h und kappte die Woche auf Last 91."""
+    from .conftest import add_activity
+    plan = _plan(conn)
+    add_activity(conn, TODAY, "strength", 50, 40, source="local", is_endurance=0, method="srpe", rpe=6)
+    for d, sport, mins, load in ((1, "run", 115, 115), (3, "swim", 44, 18), (4, "ride", 75, 55), (4, "ride", 75, 52),
+                                 (5, "run", 35, 40)):
+        add_activity(conn, MONDAY + timedelta(days=d - 1), sport, mins, load, ext=f"x{d}{sport}{mins}{load}")
+    later = MONDAY + timedelta(weeks=1)
+    b = training_baseline(conn, later + timedelta(days=1))
+    assert b["data_quality"] == "mixed"
+    assert 4.5 < b["avg_endurance_hours"] < 6.5  # drei Wochen Selbstauskunft + eine echte Woche
+    assert b["acwr_last_week"] < 1.3
+    t = week_targets(conn, plan, later, [], later + timedelta(days=1))
+    assert t["load_corridor"]["upper"] > 250 and t["target_hours"] > 5

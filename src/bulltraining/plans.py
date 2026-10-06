@@ -127,6 +127,8 @@ def plan_readiness(conn: sqlite3.Connection, plan: dict[str, Any], today: date |
             + ". Harte Einheiten dieser Sportarten folgen erst nach dem Test.")
     if baseline["data_quality"] == "manual":
         notes.append("Ausgangsumfang aus Selbstauskunft – sobald Aktivitäten synchronisiert sind, zählen die echten Daten.")
+    elif baseline["data_quality"] == "mixed":
+        notes.append("Ausgangsumfang teils aus Selbstauskunft (Wochen vor deren Datum), teils aus echten Daten.")
     elif baseline["data_quality"] != "ok":
         notes.append("Wenig Trainingsdaten in den letzten Wochen – Start konservativ. Vorher synchronisieren.")
     current = baseline["avg_endurance_hours"]

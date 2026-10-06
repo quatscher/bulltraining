@@ -271,11 +271,24 @@ def training_baseline(conn: sqlite3.Connection, as_of: date | None = None, weeks
     this_monday = monday_of(as_of)
     start = this_monday - timedelta(weeks=weeks)
     df = activities_frame(conn, start=start, end=this_monday - timedelta(days=1))
-    weekly = []
+    state = form_state(conn, this_monday - timedelta(days=1))
+    manual = manual_baseline(conn)
+    mb = _baseline_from_manual(manual, as_of, weeks, state) if manual else None
+    manual_until = to_date(manual["as_of"]) if manual and manual.get("as_of") else None
+    weekly, filled = [], []
     for i in range(weeks):
         m = start + timedelta(weeks=i)
         w = _week_actuals(df, m)
         we = w[w["is_endurance"] == 1]
+        if mb and manual_until and m + timedelta(days=6) <= manual_until                 and float(we["eff_load"].sum()) < mb["avg_endurance_load"]:
+            # Woche vor der Selbstauskunft: die Angabe beschreibt diese Wochen – ohne sie zählte die Zeit vor einem
+            # Datenneustart als „kein Training“ und der Plan bräche auf einen Bruchteil ein
+            filled.append(m)
+            weekly.append({"week": f"{m.isocalendar()[0]}-W{m.isocalendar()[1]:02d}", "source": "Selbstauskunft",
+                           "endurance_hours": mb["avg_endurance_hours"], "total_hours": mb["avg_endurance_hours"],
+                           "endurance_load": mb["avg_endurance_load"], "total_load": mb["avg_endurance_load"],
+                           "sessions": 0})
+            continue
         weekly.append({
             "week": f"{m.isocalendar()[0]}-W{m.isocalendar()[1]:02d}",
             "endurance_hours": round(we["duration_s"].sum() / 3600, 2),
@@ -284,32 +297,49 @@ def training_baseline(conn: sqlite3.Connection, as_of: date | None = None, weeks
             "total_load": round(float(w["eff_load"].sum()), 1),
             "sessions": int(len(w)),
         })
+    if mb and len(filled) == weeks:
+        return mb
     active_weeks = [w for w in weekly if w["sessions"] > 0]
     avg_hours = sum(w["endurance_hours"] for w in weekly) / weeks
     avg_load = sum(w["endurance_load"] for w in weekly) / weeks
+    used = df
+    if filled:  # echte Einzelwerte aus aufgefüllten Wochen nicht doppelt zählen
+        used = df[~df["date"].apply(lambda d: monday_of(d.date()) in filled)]
     by_sport = {}
-    for sport, g in df.groupby("sport"):
+    for sport, g in used.groupby("sport"):
         by_sport[sport] = {
-            "hours_per_week": round(g["duration_s"].sum() / 3600 / weeks, 2),
-            "sessions_per_week": round(len(g) / weeks, 1),
+            "hours_per_week": g["duration_s"].sum() / 3600 / weeks,
+            "sessions_per_week": len(g) / weeks,
             "longest_min": int(g["duration_s"].max() / 60),
-            "load_per_week": round(float(g["eff_load"].sum()) / weeks, 1),
+            "load_per_week": float(g["eff_load"].sum()) / weeks,
         }
+    if filled:
+        share = len(filled) / weeks
+        for sport, v in mb["by_sport"].items():
+            b = by_sport.setdefault(sport, {"hours_per_week": 0.0, "sessions_per_week": 0.0, "longest_min": 0,
+                                            "load_per_week": 0.0})
+            b["hours_per_week"] += v["hours_per_week"] * share
+            b["sessions_per_week"] += v["sessions_per_week"] * share
+            b["longest_min"] = max(b["longest_min"], v["longest_min"])
+            b["load_per_week"] = (b["load_per_week"] or 0) + (v["load_per_week"] or 0) * share
+    for b in by_sport.values():
+        b.update(hours_per_week=round(b["hours_per_week"], 2), sessions_per_week=round(b["sessions_per_week"], 1),
+                 load_per_week=round(b["load_per_week"], 1))
     last_week = weekly[-1] if weekly else None
     acwr = round(last_week["endurance_load"] / avg_load, 2) if last_week and avg_load > 0 else None
-    state = form_state(conn, this_monday - timedelta(days=1))
-    if not active_weeks:
+    if filled:
+        quality = "mixed"
+    elif not active_weeks:
         quality = "no_data"
     elif len(active_weeks) < max(2, weeks // 2):
         quality = "sparse"
     else:
         quality = "ok"
-    manual = manual_baseline(conn)
-    if quality != "ok" and manual:
-        return _baseline_from_manual(manual, as_of, weeks, state)
+    if quality in ("no_data", "sparse") and mb:
+        return mb
     return {
         "as_of": as_of.isoformat(), "weeks": weeks, "window": [start.isoformat(), (this_monday - timedelta(days=1)).isoformat()],
-        "data_quality": quality,
+        "data_quality": quality, "manual_as_of": manual_until.isoformat() if filled else None,
         "avg_endurance_hours": round(avg_hours, 2),
         "avg_endurance_load": round(avg_load, 1),
         "max_week_endurance_hours": max((w["endurance_hours"] for w in weekly), default=0.0),
