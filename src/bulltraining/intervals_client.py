@@ -90,6 +90,9 @@ class IntervalsClient:
     def athlete(self) -> dict:
         return self._request("GET", f"/api/v1/athlete/{self.athlete_id}")
 
+    def sport_settings(self) -> list[dict]:
+        return self.athlete().get("sportSettings") or []
+
     def activities(self, oldest: str, newest: str) -> list[dict]:
         return self._request("GET", f"/api/v1/athlete/{self.athlete_id}/activities",
                              params={"oldest": oldest, "newest": newest}) or []
@@ -119,6 +122,10 @@ class IntervalsClient:
 
     def update_event(self, event_id: str, payload: dict) -> dict:
         return self._request("PUT", f"/api/v1/athlete/{self.athlete_id}/events/{event_id}", json=payload)
+
+    def update_sport_settings(self, settings_id: int | str, payload: dict) -> dict:
+        """Sport-Einstellungen (Schwellen, Pulszonen). threshold_pace in m/s."""
+        return self._request("PUT", f"/api/v1/athlete/{self.athlete_id}/sport-settings/{settings_id}", json=payload)
 
     def delete_event(self, event_id: str) -> None:
         self._request("DELETE", f"/api/v1/athlete/{self.athlete_id}/events/{event_id}")

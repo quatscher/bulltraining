@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0
+
+- Performance page: card *Schwellen in intervals.icu* compares the thresholds from your tests with the sport
+  settings in intervals.icu (threshold HR, max HR, threshold pace, FTP, HR zones) and writes them on click –
+  so the watch and intervals.icu use the same zones. Never automatic; sports without a test are left untouched
+
 ## 0.4.3
 
 - Fix: weeks before the date of a self-reported baseline keep counting with the stated volume once real data

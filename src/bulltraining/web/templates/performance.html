@@ -6,7 +6,7 @@
 {% if state.needs_test %}
 <div class="flash err">Kein gültiger Leistungstest für: {{ state.needs_test|join(', ') }}. Der Plan setzt zuerst einen Test an und hält harte Einheiten dieser Sportart zurück.</div>
 {% endif %}
-{% for m in state.intervals_mismatch %}<div class="flash err">Abweichung zu intervals.icu: {{ m }} – dort in den Sport-Einstellungen angleichen, damit Uhr und Plan dieselben Ziele nutzen.</div>{% endfor %}
+{% for m in state.intervals_mismatch %}<div class="flash err">Abweichung zu intervals.icu: {{ m }} – unten mit „Nach intervals.icu übernehmen“ angleichen.</div>{% endfor %}
 
 <div class="grid">
 {% for key, m in state.metrics.items() %}
@@ -27,6 +27,10 @@
     <div class="big">{{ state.fitness.ctl_endurance }}</div>
     <div class="small muted">Form {{ state.fitness.form_endurance }} · Ramp 7 T {{ state.fitness.ctl_ramp_7d }}{% if state.max_hr %} · HFmax {{ state.max_hr|int }}{% endif %}</div>
   </div>
+</div>
+
+<div id="icu-thresholds" hx-get="{{ root }}/performance/icu" hx-trigger="load" hx-swap="innerHTML">
+  <div class="card small muted">Abgleich mit intervals.icu wird geladen …</div>
 </div>
 
 <h2>Aktueller Trainingsumfang und Belastbarkeit</h2>

@@ -230,6 +230,36 @@ async def performance_test(request: Request) -> RedirectResponse:
     return back("/performance", msg="Test gespeichert. " + "; ".join(parts))
 
 
+@app.get("/performance/icu", response_class=HTMLResponse)
+def performance_icu(request: Request) -> HTMLResponse:
+    """Abgleich mit den Sport-Einstellungen in intervals.icu (per HTMX nachgeladen: braucht einen API-Aufruf)."""
+    from .. import icu_thresholds
+    try:
+        with IntervalsClient() as client:
+            pending = icu_thresholds.diff(conn(), client.sport_settings())
+        error = None
+    except Exception as exc:  # noqa: BLE001 – ohne Verbindung bleibt die Seite benutzbar
+        pending, error = [], str(exc)
+    return templates.TemplateResponse(request, "_icu_thresholds.html",
+                                      {"pending": pending, "error": error, "root": ROOT_PATH.get(),
+                                       "has_local": any(icu_thresholds.local_thresholds(conn()).values())})
+
+
+@app.post("/performance/icu")
+def performance_icu_push() -> RedirectResponse:
+    from .. import icu_thresholds
+    try:
+        with IntervalsClient() as client:
+            done = icu_thresholds.push(conn(), client)
+    except IntervalsError as exc:
+        return back("/performance", err=f"intervals.icu nicht aktualisiert: {exc}")
+    if not done:
+        return back("/performance", msg="intervals.icu ist bereits auf dem Stand deiner Tests.")
+    parts = [f"{d['label']}: " + ", ".join(f"{c['label']} {c['old']} → {c['new']}" for c in d["changes"]
+                                            if c["field"] != "hr_zones") for d in done]
+    return back("/performance", msg="Nach intervals.icu übernommen. " + "; ".join(parts))
+
+
 @app.post("/performance/test/{test_id}/delete")
 def performance_test_delete(test_id: int) -> RedirectResponse:
     try:

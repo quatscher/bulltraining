@@ -1,0 +1,22 @@
+<div class="card">
+  <h3 style="margin-top:0">Schwellen in intervals.icu</h3>
+  {% if error %}
+    <p class="small bad">intervals.icu nicht erreichbar: {{ error }}</p>
+  {% elif not has_local %}
+    <p class="small muted">Noch kein Leistungstest – es gibt nichts zu übertragen.</p>
+  {% elif not pending %}
+    <p class="small ok">✓ intervals.icu rechnet mit denselben Schwellen wie deine Tests.</p>
+  {% else %}
+    <p class="small muted">intervals.icu und die Uhr berechnen Zonen aus ihren eigenen Einstellungen. Diese Werte weichen von deinen Tests ab:</p>
+    <table>
+      <tr><th>Sportart</th><th>Wert</th><th>intervals.icu</th><th>aus deinen Tests</th></tr>
+      {% for d in pending %}{% for c in d.changes %}
+      <tr><td>{{ d.label if loop.first }}</td><td>{{ c.label }}</td><td>{{ c.old }}</td><td><b>{{ c.new }}</b></td></tr>
+      {% endfor %}{% endfor %}
+    </table>
+    <form method="post" action="{{ root }}/performance/icu" onsubmit="return confirm('Werte in intervals.icu überschreiben?')" style="margin-top:8px">
+      <button class="primary">Nach intervals.icu übernehmen</button>
+    </form>
+    <p class="small muted">Pulszonen werden zur neuen Schwelle verschoben; Pace- und Leistungszonen rechnet intervals.icu selbst aus der Schwelle.</p>
+  {% endif %}
+</div>
