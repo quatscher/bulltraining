@@ -37,7 +37,7 @@
       {% for e in d.entries %}
         <a class="s pv {{ e.mark }}" href="#{{ e.anchor }}" data-open="{{ e.anchor }}" style="border-color:{{ sport_color.get(e.s.sport) }}">
           {% if e.mark != 'same' %}<span class="tag {{ e.mark }}">{{ e.note }}</span><br>{% endif %}
-          <b>{{ e.s.title }}</b><br>{{ e.s.duration_s|minutes }}{% if e.s.target_load %} · {{ e.s.target_load|round|int }}{% endif %}
+          <span class="stag" style="background:{{ sport_color.get(e.s.sport) }}">{{ sport_tag.get(e.s.sport, e.s.sport) }}</span> <b>{{ e.s.title }}</b><br>{{ e.s.duration_s|minutes }}{% if e.s.target_load %} · {{ e.s.target_load|round|int }}{% endif %}
           {{ mx.zonebar(e.zones) }}
         </a>
       {% endfor %}
@@ -48,7 +48,7 @@
   <div class="pvdetails">
   {% for e in w.entries if e.steps is not none %}
     <details id="{{ e.anchor }}" class="card pvd" style="margin:6px 0">
-      <summary><b>{{ weekday_de[e.s.date|string|weekday_index] }} {{ e.s.date[8:10] }}.{{ e.s.date[5:7] }}. · {{ e.s.title }}</b>
+      <summary><b>{{ weekday_de[e.s.date|string|weekday_index] }} {{ e.s.date[8:10] }}.{{ e.s.date[5:7] }}. · {{ sport_tag.get(e.s.sport, e.s.sport) }} · {{ e.s.title }}</b>
         <span class="muted small">· {{ e.s.duration_s|minutes }}{% if e.mark != 'same' %} · {{ e.note }}{% endif %}</span></summary>
       {{ mx.steps(e.steps) }}
     </details>

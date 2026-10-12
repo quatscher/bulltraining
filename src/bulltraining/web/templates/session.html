@@ -5,7 +5,7 @@
 <p class="small"><a class="muted" href="{{ root }}/calendar?week={{ week }}">← Kalender {{ week }}</a></p>
 <div class="row" style="justify-content:space-between; align-items:start">
   <div>
-    <h1 style="margin-bottom:4px; border-left:6px solid {{ sport_color.get(s.sport) }}; padding-left:10px">{{ s.title }}</h1>
+    <h1 style="margin-bottom:4px; border-left:6px solid {{ sport_color.get(s.sport) }}; padding-left:10px">{{ s.title }} <span class="stag" style="background:{{ sport_color.get(s.sport) }};font-size:13px;vertical-align:middle">{{ sport_tag.get(s.sport, s.sport) }}</span></h1>
     <div class="muted">{{ weekday }} {{ s.date }} · {{ s.duration_s|minutes }}{% if s.target_load %} · Last {{ s.target_load|round|int }}{% endif %}
       · <span class="pill">{{ s.status }}</span>
       {% if s.category == 'TEST' %}<span class="pill due_soon">Leistungstest</span>{% endif %}

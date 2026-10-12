@@ -76,6 +76,8 @@ templates.env.filters["weekday_index"] = lambda s: date.fromisoformat(str(s)[:10
 _conn = None
 
 SPORT_COLOR = {"run": "#e0703a", "ride": "#3a7be0", "swim": "#2bb3a8", "strength": "#8a63d2", "other": "#888"}
+# Sportart als Wort: Testtitel wie „FTP-Test“ nennen sie nicht, und Farbe allein ist nicht eindeutig
+SPORT_TAG = {"run": "Laufen", "ride": "Rad", "swim": "Schwimmen", "strength": "Kraft", "other": "Sonstiges"}
 WEEKDAY_DE = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 
 
@@ -90,7 +92,7 @@ def render(request: Request, name: str, **ctx: Any) -> HTMLResponse:
     pending = c.execute("SELECT count(*) AS n FROM plan_changes WHERE status = 'pending'").fetchone()["n"]
     dupes = c.execute("SELECT count(*) AS n FROM activities WHERE possible_duplicate_of IS NOT NULL").fetchone()["n"]
     return templates.TemplateResponse(request, name, {
-        "inbox_count": pending + dupes, "sport_color": SPORT_COLOR, "zone_names": ZONES, "zone_colors": ZONE_COLORS, "weekday_de": WEEKDAY_DE, "today": date.today(),
+        "inbox_count": pending + dupes, "sport_color": SPORT_COLOR, "sport_tag": SPORT_TAG, "zone_names": ZONES, "zone_colors": ZONE_COLORS, "weekday_de": WEEKDAY_DE, "today": date.today(),
         "flash": request.query_params.get("msg"), "error": request.query_params.get("err"), "root": ROOT_PATH.get(),
         **ctx})
 

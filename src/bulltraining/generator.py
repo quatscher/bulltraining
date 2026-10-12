@@ -121,6 +121,15 @@ def _place(week: _Week, req: dict[str, Any], avail: dict[str, dict[str, int | No
             continue
         if hard and (week.is_hard(d) or week.neighbours_hard(d) or week.hard_count() >= week.max_hard):
             continue
+        # Ein Test steht für sich: keine Qualitätseinheit am selben Tag (verfälscht den Test oder ist danach wertlos)
+        quality = ("tempo", "threshold", "vo2", "test", "race")
+        if req["intensity"] in quality and any(s.get("intensity") in quality and (
+                s.get("intensity") == "test" or req["intensity"] == "test") for s in week.slots[d]):
+            continue
+        # Kraft (Oberkörper bis zur Erschöpfung) braucht einen Tag Pause dazwischen
+        if sport == "strength" and any(s["sport"] == "strength" for x in (d - timedelta(days=1), d + timedelta(days=1))
+                                       for s in week.slots.get(x, [])):
+            continue
         score = week.minutes(d)
         if prefer and key in prefer:
             score -= 1000 * (len(prefer) - prefer.index(key))

@@ -80,3 +80,43 @@ def test_create_validates_and_web(conn):
         assert not absences.blocked(conn, "run", "2026-11-13")
     finally:
         app_module._conn = None
+
+
+def test_test_day_alone_and_strength_not_back_to_back(conn):
+    """Regression 2026-10-12: FTP-Test und Tempolauf am selben Tag, Kraft Fr+Sa direkt hintereinander."""
+    from datetime import timedelta as td
+    from bulltraining.performance import record_test
+    seed_history(conn)
+    record_test(conn, date=TODAY.isoformat(), protocol="run_30min_tt", inputs={"distance_m": 6763})
+    plan = plans.create_plan(conn, name="70.3", goal_type="event", goal_kind="triathlon_70.3", goal_date="2027-08-01",
+                             sports=["swim", "ride", "run", "strength"], weekly_hours=8, recurring=COMMUTE,
+                             today=TODAY)["plan"]
+    quality = {"tempo", "threshold", "vo2", "test"}
+    for k in range(4):
+        monday = _monday(TODAY) + td(weeks=k + 1)
+        sessions = generator.generate_week(conn, plan, monday, [], TODAY)["sessions"]
+        by_day = {}
+        for s in sessions:
+            by_day.setdefault(s["date"], []).append(s)
+        for day, items in by_day.items():
+            kinds = [s["intensity"] for s in items if s["intensity"] in quality]
+            assert not ("test" in kinds and len(kinds) > 1), (day, [s["title"] for s in items])
+        strength_days = sorted(date.fromisoformat(s["date"]) for s in sessions if s["sport"] == "strength")
+        assert all((b - a).days > 1 for a, b in zip(strength_days, strength_days[1:])), strength_days
+
+
+def test_calendar_names_the_sport_of_a_test(conn):
+    """Testtitel („FTP-Test 20 min“) nennen die Sportart nicht – der Kalender muss sie zeigen."""
+    import bulltraining.web.app as app_module
+    _setup(conn)
+    plan = plans.get_active_plan(conn)
+    res = plans.propose_plan_change(conn, [{"op": "schedule_test", "date": (TODAY + timedelta(days=2)).isoformat(),
+                                            "sport": "ride", "protocol": "ride_ftp20"}], "FTP-Test einplanen",
+                                    today=TODAY)
+    plans.apply_change(conn, res["change_id"], today=TODAY)
+    app_module._conn = conn
+    try:
+        html = TestClient(app_module.app).get(f"/calendar?week={(TODAY + timedelta(days=2)).isoformat()}").text
+        assert '<span class="stag"' in html and ">Rad</span> <b>FTP-Test 20 min</b>" in html
+    finally:
+        app_module._conn = None
