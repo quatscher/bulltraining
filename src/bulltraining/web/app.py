@@ -488,9 +488,31 @@ async def activity_create(request: Request) -> RedirectResponse:
 def plans_view(request: Request) -> HTMLResponse:
     c = conn()
     plan = plans.get_active_plan(c)
+    from .. import absences
     return render(request, "plans.html", plans=plans.list_plans(c), active=plan,
                   readiness=plans.plan_readiness(c, plan) if plan else None,
-                  templates_list=available_templates(), sports=SPORTS, weekdays=WEEKDAYS)
+                  templates_list=available_templates(), sports=SPORTS, weekdays=WEEKDAYS,
+                  absences=absences.list_all(c), absence_sports=(plan["sports"] if plan else SPORTS),
+                  sport_label=absences.SPORT_LABEL)
+
+
+@app.post("/absences")
+async def absence_create(request: Request) -> RedirectResponse:
+    from .. import absences
+    form = await request.form()
+    resume = {k[len("resume__"):]: str(v) for k, v in form.items() if k.startswith("resume__") and v}
+    try:
+        absences.create(conn(), str(form.get("reason") or ""), str(form.get("start_date") or ""), resume)
+    except absences.AbsenceError as exc:
+        return back("/plans", err=str(exc))
+    return back("/plans", msg="Ausfallzeit gespeichert. Neu generierte Wochen berücksichtigen sie.")
+
+
+@app.post("/absences/{absence_id}/delete")
+def absence_delete(absence_id: int) -> RedirectResponse:
+    from .. import absences
+    absences.delete(conn(), absence_id)
+    return back("/plans", msg="Ausfallzeit gelöscht.")
 
 
 @app.post("/plans")

@@ -59,7 +59,9 @@ def validate_weeks(conn: sqlite3.Connection, plan: dict[str, Any], state: list[d
             errors.append(f"{label}: Wochenlast {eff['load']:.0f} über Obergrenze {corridor['upper']:.0f} "
                           f"(Referenz {targets['reference']['load']:.0f}, {targets['reference']['source']}). "
                           "Überforderung – Umfang oder Intensität reduzieren.")
-        if targets["context"]["week_type"] == "load" and eff["load"] < corridor["lower"] * (1 - LOAD_TOLERANCE):
+        from .absences import blocked, overlaps
+        paused_week = bool(overlaps(conn, monday, days[-1]))
+        if targets["context"]["week_type"] == "load" and eff["load"] < corridor["lower"] * (1 - LOAD_TOLERANCE)                 and not paused_week:
             warnings.append(f"{label}: Wochenlast {eff['load']:.0f} unter Untergrenze {corridor['lower']:.0f} "
                             "– Unterforderung, sofern nicht bewusst (Krankheit, HRV) reduziert.")
         # 4) lange Einheiten nicht weit über das zuletzt Gelaufene/Gefahrene hinaus
@@ -82,6 +84,14 @@ def validate_weeks(conn: sqlite3.Connection, plan: dict[str, Any], state: list[d
             elif avail[s["sport"]][day] and s["duration_s"] / 60 > avail[s["sport"]][day] * (1 + LOAD_TOLERANCE):
                 errors.append(f"{label}: {s['title']} ({s['duration_s'] // 60} min) passt nicht ins Zeitfenster "
                               f"von {avail[s['sport']][day]} min.")
+        # 5b) Ausfallzeit: gesperrte Sportart an diesem Tag
+        if paused_week:
+            for s in week:
+                if to_date(s["date"]) >= today and s.get("category") != "RACE":
+                    a = blocked(conn, s["sport"], s["date"])
+                    if a:
+                        errors.append(f"{label}: {s['title']} am {s['date']} liegt in der Ausfallzeit „{a['reason']}“ "
+                                      f"({a['resume_text']}).")
         # 6) Intensität ohne Testgrundlage: nur Hinweis
         for s in week:
             if s.get("intensity") in ("threshold", "vo2") and s["sport"] in ENDURANCE_SPORTS \

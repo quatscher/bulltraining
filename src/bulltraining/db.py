@@ -150,6 +150,15 @@ CREATE TABLE IF NOT EXISTS settings (
   value         TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS absences (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  reason        TEXT NOT NULL,
+  start_date    TEXT NOT NULL,
+  end_date      TEXT NOT NULL,
+  resume_json   TEXT NOT NULL,
+  created_at    TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS bikes (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   name          TEXT NOT NULL,

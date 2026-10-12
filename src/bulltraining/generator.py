@@ -70,6 +70,7 @@ class _Week:
         for s in fixed:
             self.slots[to_date(s["date"])].append(s)
         self.rest_day: date | None = None
+        self.blocked: set[tuple[str, date]] = set()  # (Sportart, Tag) in einer Ausfallzeit
         self.outside_hard: set[date] = set()  # harte Tage direkt vor/nach der Woche (Sonntag davor, Montag danach)
 
     def is_hard(self, d: date) -> bool:
@@ -110,7 +111,7 @@ def _place(week: _Week, req: dict[str, Any], avail: dict[str, dict[str, int | No
     for d in week.open_days():
         key = weekday_key(d)
         sport_days = avail.get(sport, {})
-        if key not in sport_days:
+        if key not in sport_days or (sport, d) in week.blocked:
             continue
         if any(s["sport"] == sport for s in week.slots[d]) or len(week.slots[d]) >= 2:
             continue
@@ -186,6 +187,8 @@ def generate_week(conn: sqlite3.Connection, plan: dict[str, Any], monday: date,
                          and s.get("intensity") in workouts.HARD
                          and to_date(s["date"]) in (monday - timedelta(days=1), sunday + timedelta(days=1))}
     avail = availability(plan)
+    from . import absences
+    week.blocked = absences.blocked_pairs(conn, list(avail) + ["strength"], week.days)
     baseline = training_baseline(conn, as_of=min(monday, today))
     recurring = _recurring_sessions(conn, plan, monday, today, fixed)
     for s in recurring:
@@ -196,7 +199,14 @@ def generate_week(conn: sqlite3.Connection, plan: dict[str, Any], monday: date,
                           reduction=targets["target_hours"] / targets["reference"]["hours"]
                           if reduced and targets["reference"]["hours"] else None)
     # Anteil der Woche, der noch planbar ist (bei laufender Woche)
-    open_fraction = len([d for d in week.days if d >= today]) / 7
+    # Tage einer Ausfallzeit, an denen keine Ausdauersportart erlaubt ist, zählen nicht mit
+    endurance = [s for s in avail if s in ENDURANCE_SPORTS]
+    open_fraction = len([d for d in week.days if d >= today
+                         and any((s, d) not in week.blocked for s in endurance)]) / 7
+    paused = {s for s in list(avail) + ["strength"]
+              if all((s, d) in week.blocked for d in week.days if d >= today)} if week.blocked else set()
+    if paused:
+        warnings.append("Ausfallzeit: " + ", ".join(sorted(paused)) + " diese Woche pausiert")
     fixed_hours = sum(s["duration_s"] for s in fixed if s["sport"] in ENDURANCE_SPORTS and to_date(s["date"]) >= today) / 3600
     plan_hours = max(0.0, targets["target_hours"] * open_fraction - fixed_hours)
     rec_min: dict[str, float] = {}
@@ -219,13 +229,15 @@ def generate_week(conn: sqlite3.Connection, plan: dict[str, Any], monday: date,
     test_budget = {"left": MAX_TESTS_PER_WEEK, "load": targets["load_corridor"]["upper"] * MAX_TEST_LOAD_SHARE}
     # nach Gewicht im Wettkampf: die größte Sportart bekommt zuerst ihren Test und damit ihre Qualitätseinheiten
     for sport, share in sorted(shares.items(), key=lambda kv: -kv[1]):
+        if sport in paused:
+            continue
         # feste Einheiten (z. B. Pendeln) gehören zum Anteil ihrer Sportart
         budget = max(0.0, plan_hours * 60 * share - rec_min.get(sport, 0))
         requests += _sport_requests(conn, plan, sport, budget, ctx, targets, baseline,
                                     key_intensity, avail, state, monday, today, warnings, rec_n.get(sport, 0),
                                     test_budget)
 
-    if "strength" in plan_sports(plan) and ctx["week_type"] != "race":
+    if "strength" in plan_sports(plan) and ctx["week_type"] != "race" and "strength" not in paused:
         habit = baseline["strength_sessions_per_week"]
         count = 1 if ctx["week_type"] in ("recovery", "taper") else max(1, min(2, round(habit) or 1))
         for _ in range(count):
@@ -292,6 +304,9 @@ def _recurring_sessions(conn: sqlite3.Connection, plan: dict[str, Any], monday: 
         title = r.get("title")
         if d < today or any(to_date(f["date"]) == d and f.get("title") == title for f in fixed):
             continue
+        from .absences import blocked
+        if blocked(conn, r["sport"], d):
+            continue  # z. B. kein Pendeln mit dem Rad während einer Ausfallzeit
         built = workouts.build(conn, r["sport"], r.get("intensity", "easy"), int(r["duration_min"]))
         s = {"date": d.isoformat(), "sport": r["sport"], **built, "status": "planned", "recurring": True}
         if title:

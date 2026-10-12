@@ -20,6 +20,25 @@
 </div>
 {% endif %}
 
+<h2>Ausfallzeiten</h2>
+<div class="card">
+  {% for a in absences %}
+  <div class="row" style="justify-content:space-between;margin-bottom:6px">
+    <div><b>{{ a.reason }}</b> <span class="small muted">ab {{ a.start_date }} · {{ a.resume_text }}</span></div>
+    <form class="inline" method="post" action="{{ root }}/absences/{{ a.id }}/delete" onsubmit="return confirm('Ausfallzeit löschen?')"><button>Löschen</button></form>
+  </div>
+  {% else %}<p class="small muted">Keine. Für OP, Krankheit oder Reise: in dieser Zeit plant der Generator die gesperrten Sportarten nicht ein.</p>{% endfor %}
+  <form method="post" action="{{ root }}/absences" class="row" style="margin-top:8px">
+    <div><label>Grund</label><input name="reason" required placeholder="z. B. OP Nase" style="width:150px"></div>
+    <div><label>Ab (kein Training)</label><input type="date" name="start_date" required></div>
+    {% for s in absence_sports %}
+    <div><label>{{ sport_label.get(s, s) }} wieder ab</label><input type="date" name="resume__{{ s }}"></div>
+    {% endfor %}
+    <button class="primary">Speichern</button>
+  </form>
+  <p class="small muted">Sportarten ohne Datum bleiben bis zum spätesten Wiedereinstieg gesperrt. Nach der Pause steigt der Plan automatisch behutsam wieder ein: die Pausenwochen senken die Lastgrenzen.</p>
+</div>
+
 <h2>Neuer Plan</h2>
 <form class="card" method="post" action="{{ root }}/plans">
   <div class="row">

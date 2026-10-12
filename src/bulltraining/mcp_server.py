@@ -116,8 +116,12 @@ def get_wellness_trend(days: int = 14) -> dict[str, Any]:
 @mcp.tool()
 def get_plan(date_from: str | None = None, date_to: str | None = None) -> dict[str, Any]:
     """Geplante Einheiten des aktiven Plans mit Status, Phase, Wochentyp und Minuten je Zone (zones_min, Z1–Z5).
-    Standard: zwei Wochen ab Montag."""
-    return plans.get_plan_view(conn(), date_from, date_to)
+    Standard: zwei Wochen ab Montag. absences: aktuelle/kommende Ausfallzeiten (OP, Krankheit) mit Wiedereinstieg
+    je Sportart – dort nichts einplanen."""
+    from . import absences
+    view = plans.get_plan_view(conn(), date_from, date_to)
+    view["absences"] = absences.list_all(conn())
+    return view
 
 
 @mcp.tool()
