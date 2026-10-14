@@ -42,7 +42,7 @@ def validate_weeks(conn: sqlite3.Connection, plan: dict[str, Any], state: list[d
             if d in hard_days and d + timedelta(days=1) in hard_days and d + timedelta(days=1) >= today:
                 errors.append(f"{label}: harte Tage in Folge am {d.isoformat()} und {(d + timedelta(days=1)).isoformat()}.")
         # 2) mindestens ein vollständig freier Tag (vergangene Tage zählen nach tatsächlichen Aktivitäten)
-        busy = {to_date(s["date"]) for s in week}
+        busy = {to_date(s["date"]) for s in week if to_date(s["date"]) >= today}
         for r in conn.execute("SELECT DISTINCT substr(start_date,1,10) AS d FROM activities WHERE excluded = 0 "
                               "AND start_date >= ? AND start_date < ?", (monday.isoformat(), today.isoformat())):
             busy.add(to_date(r["d"]))
@@ -110,8 +110,11 @@ def check_op_dates(plan: dict[str, Any], touched: list[tuple[str, dict[str, Any]
     t_start = taper_start(plan)
     goal = to_date(plan["goal_date"]) if plan.get("goal_date") else None
     for op, before, after in touched:
+        # Ausnahme: eine vergangene, nicht absolvierte Einheit darf gelöscht werden (ausgefallen, soll nicht als
+        # verpasst im Plan stehen bleiben); verschieben oder ändern bleibt gesperrt
+        dropping_missed = op == "delete_session" and after is None
         for s in (before, after):
-            if s and to_date(s["date"]) < today:
+            if s and to_date(s["date"]) < today and not dropping_missed:
                 errors.append(f"{op}: Einheit am {s['date']} liegt in der Vergangenheit und bleibt unverändert.")
             if s and s.get("status") in ("done", "skipped"):
                 errors.append(f"{op}: Einheit {s.get('id')} ist bereits '{s['status']}'.")

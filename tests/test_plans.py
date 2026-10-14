@@ -128,6 +128,42 @@ def test_hard_days_and_rest_day_rules(conn):
     assert "in Folge" in str(exc.value) and "freier Tag" in str(exc.value)
 
 
+def test_missed_past_session_counts_as_free_day(conn):
+    """Regression 2026-10-14: ausgefallener Test am Dienstag zählte als belegt, Vorschlag ohne freien Tag abgelehnt."""
+    seed_history(conn)
+    _all_tests_valid(conn)
+    _plan(conn)
+    week = [{"date": (MONDAY + timedelta(days=i)).isoformat(), "sport": "run", "intensity": "easy", "duration_min": 30}
+            for i in range(7) if i != 2]
+    res = plans.propose_plan_change(conn, [{"op": "regenerate_week", "week": "2026-W40", "sessions": week}],
+                                    "Woche ohne Mittwoch", today=TODAY)
+    plans.apply_change(conn, res["change_id"], today=TODAY)
+    wednesday = MONDAY + timedelta(days=2)
+    plans.propose_plan_change(conn, [{"op": "add_race", "date": wednesday.isoformat(), "sport": "run",
+                                      "name": "Firmenlauf", "priority": "C", "duration_min": 30}],
+                              "Mo+Di ausgefallen, Mittwoch belegen", today=wednesday)
+
+
+def test_missed_past_session_can_be_deleted_but_not_moved(conn):
+    """Regression 2026-10-14: ausgefallener FTP-Test vom Vortag ließ sich nicht aus dem Plan nehmen."""
+    seed_history(conn)
+    _all_tests_valid(conn)
+    plan = _plan(conn)
+    res = plans.propose_plan_change(conn, [{"op": "schedule_test", "date": (MONDAY + timedelta(days=1)).isoformat(),
+                                            "sport": "ride", "protocol": "ride_ftp20"}], "FTP-Test einplanen",
+                                    today=TODAY)
+    plans.apply_change(conn, res["change_id"], today=TODAY)
+    test = next(s for s in plans.get_sessions(conn, plan["id"]) if s["category"] == "TEST")
+    later = MONDAY + timedelta(days=2)
+    with pytest.raises(plans.PlanError, match="Vergangenheit"):
+        plans.propose_plan_change(conn, [{"op": "move_session", "session_id": test["id"], "to_date": later.isoformat()}],
+                                  "Test nachholen", today=later)
+    res = plans.propose_plan_change(conn, [{"op": "delete_session", "session_id": test["id"]}],
+                                    "Test ausgefallen", today=later)
+    plans.apply_change(conn, res["change_id"], today=later)
+    assert all(s["id"] != test["id"] for s in plans.get_sessions(conn, plan["id"]))
+
+
 def test_past_and_taper_locked(conn):
     seed_history(conn)
     _all_tests_valid(conn)

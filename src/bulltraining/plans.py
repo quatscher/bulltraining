@@ -564,11 +564,12 @@ def apply_change(conn: sqlite3.Connection, change_id: int, today: date | None = 
             raise PlanError("Der Plan dieses Vorschlags ist nicht mehr aktiv. Vorschlag verwerfen.")
         diff = ch["diff"]
         conflicts = []
+        deleted_ids = {a["id"] for a in diff["after"] if a.get("_deleted")}
         for b in diff["before"]:
             cur = _current(conn, b["id"])
             if cur is None or cur["status"] not in CHANGEABLE or _differs(cur, b):
                 conflicts.append(f"Einheit {b['id']} ({b['title']}) wurde seit dem Vorschlag geändert oder erledigt.")
-            elif to_date(b["date"]) < today:
+            elif to_date(b["date"]) < today and b["id"] not in deleted_ids:
                 conflicts.append(f"{b['title']} am {b['date']} liegt inzwischen in der Vergangenheit.")
         for a in diff["after"]:
             if not a.get("_deleted") and to_date(a["date"]) < today:

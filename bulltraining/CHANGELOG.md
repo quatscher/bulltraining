@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.0
+
+- Absences (surgery, illness, travel) on the plans page: per sport a date from which it is allowed again. The
+  generator plans nothing blocked (not even recurring sessions like commuting), the rules reject proposals into an
+  absence, and the pause weeks lower the load corridor so the comeback starts conservatively
+- Generator: no second hard session on a test day, no strength sessions on consecutive days
+- Calendar, inbox and session page show the sport as a coloured tag (test titles like "FTP-Test" don't name it)
+- Fix: a missed past session no longer blocks the "at least one free day" rule, and it can be deleted from the plan
+  (moving or changing past sessions stays locked)
+
 ## 0.5.0
 
 - Performance page: card *Schwellen in intervals.icu* compares the thresholds from your tests with the sport
